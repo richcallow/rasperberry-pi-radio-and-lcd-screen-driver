@@ -1,0 +1,37 @@
+[package]
+name = "rrr"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+#gstreamer-sys = "0.23.5"
+anyhow = "1.0.95" # General Error Type
+async-channel = "2.1.0"
+chrono = "0.4.40"
+clap = { version = "4.5.31", features = ["derive"] }
+compile-time = "0.2.0"
+crossterm = { version = "0.28.1", features = ["event-stream"] }
+futures = "0.3.31"
+futures-util = "0.3.31"
+glib = "0.20.5"
+gstr = "0.2.0"
+gstreamer = "0.23.5"
+gstreamer-audio = "0.23.5"
+hex = "0.4.3"
+humantime-serde = "1.1.1"
+parse = "0.1.2"
+pin-project = "1.1.3"
+pnet = "0.35.0"
+pnet_datalink = "0.35.0" # used to get the local IP address
+rand = "0.9.1"
+serde = { version = "1.0.193", features = ["derive", "rc"] }
+substring = "1.4.5"
+sys-mount = "3.0.1"
+thousands = "0.2.0"
+tokio = { version = "1.43.0", features = ["rt", "io-util", "net", "time", "macros", "sync"] }
+tokio-stream = "0.1.17" 
+toml = "0.8.20"
+unidecode = "0.3.0" # encode unicode into lcd screen encoding
+libc = "0.2.172"
+eject = "0.1.1"
+nix = { version = "0.30.1", features = ["ioctl"] }
