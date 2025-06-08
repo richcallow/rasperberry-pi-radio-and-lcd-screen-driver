@@ -17,8 +17,8 @@ pub struct ChannelFileDataFromTOML {
     pub station_url: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-/// enum of the pososible media types
+#[derive(Debug, PartialEq)]
+/// enum of the possible media types
 pub enum SourceType {
     Unknown,
     UrlList,
@@ -26,7 +26,7 @@ pub enum SourceType {
     Usb,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, PartialEq)]
 /// decoded data sucessfully read from the station channel file
 pub struct ChannelFileDataDecoded {
     /// The name of the organisation    eg       organisation = "Tradcan"
@@ -86,7 +86,7 @@ pub enum ChannelErrorEvents {
     CouldNotGetNumberOfCDTracks(i32),
 }
 impl ChannelErrorEvents {
-    /// given an error enum, returns  a string to go on the LCD screen
+    /// Given an error enum, returns  a string to go on the LCD screen
     pub fn to_lcd_screen(&self) -> String {
         match &self {
             ChannelErrorEvents::CouldNotFindChannelFile => "unused".to_string(),
@@ -157,6 +157,7 @@ impl ChannelErrorEvents {
                 //&103 => "CdIsXA21)".to_string(),                    // CDS_XA_2_1
                 //&104 => "CdIsXA22)".to_string(),                    // CDS_XA_2_2
                 //&105 => tracing::debug!("Mixed CD"),         // CDS_MIXED
+                -1 => "bad CD error from OS".to_string(),
                 _ => format!("unexpected CD error {}", error).to_string(),
             },
             ChannelErrorEvents::CouldNotGetNumberOfCDTracks(error) => {
@@ -167,9 +168,8 @@ impl ChannelErrorEvents {
 }
 
 /// Given the folder that contains the channel files & the channel number as a string.
-/// If successful returns the details of the channel as the struct ChannelFileData.
-/// namely organisation, station_url (which is type SourceType::UrlList)
-/// & setting the source type to be Source_type: SourceType::UrlList
+/// If successful returns the details of the channel as the struct ChannelFileData
+/// namely organisation, station_url & sets the source type to be SourceType::UrlList
 ///
 pub fn get_usb_details(
     config: &crate::read_config::Config, // the data read from rradio's config.toml
@@ -182,7 +182,7 @@ pub fn get_usb_details(
             status_of_rradio,
         ) {
             Ok(_mount_result) => {
-                let mut list_of_audio_cd_images = vec![]; //get an empty list of all the audio CD images on the USB memory stick
+                let mut list_of_audio_album_images = vec![]; //get an empty list of all the audio CD images on the USB memory stick
 
                 let length_of_mount_folder_path = usb_config.mount_folder.len();
 
@@ -219,7 +219,7 @@ pub fn get_usb_details(
                                                                                     album_dir_entry
                                                                                         .path()
                                                                                 );
-                                                                                list_of_audio_cd_images.push(format!("{:?}", album_dir_entry.path())); // the use of (:?} adds unwanted quotes arround the string)
+                                                                                list_of_audio_album_images.push(format!("{:?}", album_dir_entry.path())); // the use of (:?} adds unwanted quotes arround the string)
                                                                                 break;
                                                                             }
                                                                             _ => {} // if it is not a music file skip it
@@ -282,12 +282,13 @@ pub fn get_usb_details(
                     }
                 }
 
-                let chosen_cd_with_quotes = list_of_audio_cd_images
-                    [rand::random_range(0..=(list_of_audio_cd_images.len() - 1))]
+                let chosen_album_with_quotes = list_of_audio_album_images
+                    [rand::random_range(0..=(list_of_audio_album_images.len() - 1))]
                 .as_str(); // there are unwanted quotes around the string
-                let chosen_cd = chosen_cd_with_quotes.substring(1, chosen_cd_with_quotes.len() - 1); // remove the quotes
+                let chosen_album =
+                    chosen_album_with_quotes.substring(1, chosen_album_with_quotes.len() - 1); // remove the quotes
                 let mut list_of_wanted_tracks = vec![]; // list of the tracks that we will return
-                match fs::read_dir(chosen_cd) {
+                match fs::read_dir(chosen_album) {
                     Ok(audio_files) => {
                         for file_as_result in audio_files {
                             if let Ok(audio_file_dir_entry) = file_as_result {
@@ -329,8 +330,8 @@ pub fn get_usb_details(
                 }
 
                 Ok(ChannelFileDataDecoded {
-                    organisation: chosen_cd // if we remove the first part, we get the singer's name and the album name concatonated together
-                        .substring(length_of_mount_folder_path + 1, chosen_cd.len() - 1)
+                    organisation: chosen_album // if we remove the first part, we get the singer's name and the album name concatonated together
+                        .substring(length_of_mount_folder_path + 1, chosen_album.len() - 1)
                         .to_string(),
                     station_url: list_of_wanted_tracks,
                     source_type: SourceType::Usb,
@@ -346,10 +347,12 @@ pub fn get_usb_details(
 #[repr(C)]
 #[derive(Debug, Default)]
 struct CdToc {
-    cdth_trk0: u8, /* start track */
-    cdth_trk1: u8, /* end track */
+    first_cd_track: u8, /* start track */
+    last_cd_track: u8,  /* end track */
 }
 
+/// If successful returns the details of the channel as the struct ChannelFileData
+/// namely organisation (=CD), station_url & sets the source type to be SourceType::CD
 pub fn get_cd_details(
     config: &crate::read_config::Config, // the data read from rradio's config.toml
     status_of_rradio: &mut PlayerStatus,
@@ -363,18 +366,17 @@ pub fn get_cd_details(
     const CDROMREADTOCHDR: u64 = 0x5305; /* Read TOC header
                                          (struct cdrom_tochdr) */
 
-    //  nix::ioctl_none!(read_status, CDROM_DISC_STATUS,)
-    nix::ioctl_none_bad!(read_cd_status, CDROM_DRIVE_STATUS);
-
+    /*nix::ioctl_none_bad!(read_cd_status, CDROM_DRIVE_STATUS);     // nix way of reading a CD drive
     match unsafe { read_cd_status(device.as_raw_fd()) } {
         Ok(4) => {}
         Ok(n) => {}
         Err(error) => {
-            let g: i32 = 3; //error.into();
+            println!("err{:?}", error)
         }
-    };
+    };*/
 
-    match unsafe { libc::ioctl(device.as_raw_fd(), CDROM_DRIVE_STATUS, 0) } {
+    // first see if the CD drive is working OK & has a disk it it
+    match unsafe { libc::ioctl(device.as_raw_fd(), CDROM_DRIVE_STATUS) } {
         4 => {} // CDS_DISC_OK
         //0 => return Err(ChannelErrorEvents::FailedtoGetCDdriveStatus(0)), // CDS_NO_INFO
         //1 => return Err(ChannelErrorEvents::FailedtoGetCDdriveStatus(1)), // CDS_NO_DISC
@@ -383,8 +385,9 @@ pub fn get_cd_details(
         n => return Err(ChannelErrorEvents::FailedtoGetCDdriveOrDiskStatus(n)),
     };
 
-    match unsafe { libc::ioctl(device.as_raw_fd(), CDROM_DISC_STATUS, 0) } {
-        100 => {} // CDS_AUDIO
+    // & having checked that there is a disk in a CD drive, check that it contains a audio tracks
+    match unsafe { libc::ioctl(device.as_raw_fd(), CDROM_DISC_STATUS) } {
+        100 => {} // CDS_AUDIO; the normal case
         // 0 => return Err(CdError::NoCdInfo),         // CDS_NO_INFO
         // 1 => return Err(CdError::NoCd),             // CDS_NO_DISC
         // 2 => return Err(CdError::CdTrayIsOpen),     // CDS_TRAY_OPEN
@@ -397,32 +400,31 @@ pub fn get_cd_details(
         n => return Err(ChannelErrorEvents::FailedtoGetCDdriveOrDiskStatus(n)),
     }
     let mut toc = CdToc::default();
-
     let result = unsafe { libc::ioctl(device.as_raw_fd(), CDROMREADTOCHDR, &mut toc) };
     match result {
         0 => {} // 0 is the Ok result
         _ => return Err(ChannelErrorEvents::CouldNotGetNumberOfCDTracks(result)),
     };
 
-    //let tracks = (toc.cdth_trk0..=toc.cdth_trk1);
-    println!("  tracks {:?}   {} \r", toc.cdth_trk0, toc.cdth_trk1);
-
     status_of_rradio.channel_file_data.source_type = SourceType::CD;
     status_of_rradio.channel_file_data.organisation = "CD".to_string();
 
     let mut station_url = Vec::new();
-    for track_count in toc.cdth_trk0..=toc.cdth_trk1 {
+
+    for track_count in toc.first_cd_track..=toc.last_cd_track {
+        // the = sign means use last_cd_track  & not stop just beforehand
         station_url.push(format!("cdda://{track_count}"));
     }
-    // if we get here everything has worked
+    // if we get here everything has worked, so workout if we need to add a ding if one has been specified at the end of the list of tracks.
     if let Some(filename_sound_at_end_of_playlist) =
         &config.aural_notifications.filename_sound_at_end_of_playlist
     {
-        // add a ding if one has been specified at the end of the list of tracks
-        station_url.push(format!("file://{filename_sound_at_end_of_playlist}"));
+        if !station_url.is_empty() {
+            // only put a ding if we have found at least one track
+            station_url.push(format!("file://{filename_sound_at_end_of_playlist}"))
+        }
     }
 
-    println!("list{:?}\r", station_url);
     Ok(ChannelFileDataDecoded {
         organisation: "CD".to_string(),
         station_url,
@@ -497,8 +499,6 @@ pub fn get_channel_details(
                         error_message: toml_eror.to_string(),
                     }
                 })?;
-
-                println!("toml{:?}\r", toml_data);
                 return Ok(ChannelFileDataDecoded {
                     organisation: toml_data.organisation,
                     station_url: toml_data.station_url,

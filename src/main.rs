@@ -54,9 +54,31 @@ enum Event {
     Ticker(tokio::time::Instant),
 }
 
+// http://192.168.0.2:8082
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), String> {
     //    we need async as for example, we will need to wait for input from gstreamer or the keyboard
+
+    /*    let socket_fd = nix::sys::socket::socket(
+        nix::sys::socket::AddressFamily::Inet,
+        nix::sys::socket::SockType::Raw,
+        nix::sys::socket::SockFlag::empty(),
+        nix::sys::socket::SockProtocol::Icmp,
+    )
+    .unwrap();
+    println!("socket_fd{:?}", socket_fd);
+    //nix::sys::socket::sendto(socket_fd.as_raw_fd(), buf, addr, flags).unwrap();
+
+    //nix::sys::socket::recvfrom(socket_fd.as_raw_fd(), buf).unwrap();
+
+    https://stackoverflow.com/questions/29307390/how-does-fd-isset-work
+    https://github.com/torvalds/linux/blob/master/include/net/icmp.h
+    https://docs.rs/nix/latest/nix/sys/socket/enum.SockProtocol.html
+    https://docs.rs/nix/latest/nix/sys/socket/fn.socket.html
+    https://docs.rs/tokio/latest/tokio/io/unix/struct.AsyncFd.html#method.new
+    */
+
     let mut lcd;
     match lcd::Lc::new() {
         Ok(success) => lcd = success,
