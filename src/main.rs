@@ -101,10 +101,11 @@ async fn main() -> Result<(), String> {
                     return Ok(());
                 }
                 _ => {
-                    let error_message = format!("Unhandled argument {arg:?}. The valid arguments are -c followed by the configuration file name OR - V");
-                    let mut text_buffer: TextBuffer = TextBuffer::new();
+                    let error_message = format!("Unhandled argument  {arg:?}. Valid arguments are -c then the config file name OR -V");
+
+                    let mut text_buffer = TextBuffer::new();
                     text_buffer.write_abortive_error_message_to_entire_buffer(&error_message);
-                    lcd.write_text_buffer(&text_buffer);
+                    lcd.write_text_buffer_to_lcd(&text_buffer);
                     return Err(error_message);
                 }
             }
@@ -133,7 +134,7 @@ async fn main() -> Result<(), String> {
     } else {
         status_of_rradio.all_4lines = ScrollData::new("Failed it to intialise gstreamer", 4);
         status_of_rradio.running_status = lcd::RunningStatus::BadErrorMessage;
-        lcd.fill_text_buffer_and_write_to_lcd(&status_of_rradio);
+        lcd.write_rradio_status_to_lcd(&status_of_rradio);
     };
 
     match gstreamer_interfaces::PlaybinElement::setup(&config) {
@@ -145,7 +146,7 @@ async fn main() -> Result<(), String> {
                 status_of_rradio.channel_file_data.station_url = vec![format!("file://{filename}")];
                 if let Err(error_message) = playbin.play_track(&status_of_rradio) {
                     status_of_rradio.all_4lines = ScrollData::new(error_message.as_str(), 4);
-                    lcd.fill_text_buffer_and_write_to_lcd(&status_of_rradio);
+                    lcd.write_rradio_status_to_lcd(&status_of_rradio);
                 }
             } else {
                 println!("No startup ding wanted");
@@ -170,9 +171,24 @@ async fn main() -> Result<(), String> {
             )
             .map(Event::Ticker);
 
-            let start_time = tokio::time::Instant::now();
+            let scroll_period = tokio::time::Duration::from_millis(1600);
+            let mut last_scroll_time = tokio::time::Instant::now();
 
             loop {
+                //#[allow(clippy::needless_late_init)]
+                let timeout_time;
+
+                match status_of_rradio.running_status {
+                    RunningStatus::NoChannel | RunningStatus::NoChannelRepeated => {
+                        timeout_time = last_scroll_time + std::time::Duration::from_millis(200)
+                        // we are not scrolling, but we want to update the time frequently
+                    }
+                    _ => {
+                        // we  are scrolling, so the timeout has to be right for scrolling
+                        timeout_time = last_scroll_time + scroll_period;
+                    }
+                }
+
                 let event = std::future::poll_fn(|cx| {
                     //First poll the keyboard events source for keyboard events
                     match mapped_keyboard_events.poll_next_unpin(cx) {
@@ -205,7 +221,7 @@ async fn main() -> Result<(), String> {
                         let _unmount_result = unmount_if_needed(&config, &mut status_of_rradio);
                         status_of_rradio.running_status = lcd::RunningStatus::ShuttingDown;
                         lcd.clear(); // we are ending the program if we get to here
-                        lcd.fill_text_buffer_and_write_to_lcd(&status_of_rradio);
+                        lcd.write_rradio_status_to_lcd(&status_of_rradio);
                         break; // if we get here, the program will terminate
                     } //One of the streams has closed, signalling a shutdown of the program, so break out of the main loop
                     Some(Event::Keyboard(keyboard_event)) => match keyboard_event {
@@ -470,14 +486,15 @@ async fn main() -> Result<(), String> {
                         } // else if there is no position we cannot do anything useful
                     }
                 }
-                lcd.fill_text_buffer_and_write_to_lcd(&status_of_rradio);
+
+                lcd.write_rradio_status_to_lcd(&status_of_rradio);
             } // closing parentheses of loop
         }
         Err(message) => {
             status_of_rradio.all_4lines =
                 ScrollData::new(format!("Failed to get a playbin: {message}").as_str(), 4);
             status_of_rradio.running_status = RunningStatus::BadErrorMessage;
-            lcd.fill_text_buffer_and_write_to_lcd(&status_of_rradio);
+            lcd.write_rradio_status_to_lcd(&status_of_rradio);
         }
     }
 

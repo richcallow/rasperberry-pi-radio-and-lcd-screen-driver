@@ -191,7 +191,7 @@ pub struct TextBuffer {
 }
 
 impl TextBuffer {
-    /// Create a new textbuffer containing NUM_CHARACTERS_PER_SCREEN sapces
+    /// Create a new empty textbuffer containing NUM_CHARACTERS_PER_SCREEN sapces
     pub const fn new() -> Self {
         // const means it can be evaluated at compile time
         Self {
@@ -199,8 +199,8 @@ impl TextBuffer {
         }
     }
 
-    /// Copies octet_count octets from text as bytes into the offset specified by start into the buffer TextBuffer
-    pub fn write_text(
+    /// Copies octet_count octets from text as bytes into the offset specified by start into self.buffer
+    pub fn write_text_to_buffer(
         &mut self,
         text_bytes: impl Iterator<Item = u8>,
         start: usize,
@@ -234,7 +234,7 @@ impl TextBuffer {
         line: LineNum,
         line_count: usize,
     ) {
-        self.write_text(
+        self.write_text_to_buffer(
             text_bytes,
             line.into_usize() * NUM_CHARACTERS_PER_LINE,
             line_count * NUM_CHARACTERS_PER_LINE,
@@ -344,23 +344,24 @@ impl Lc {
         Self::clear_screen(&mut self.lcd_file);
     }
 
-    pub fn fill_text_buffer_and_write_to_lcd(
-        &mut self,
-        status_of_rradio: &player_status::PlayerStatus,
-    ) {
-        /*println!(
-            "chanel number {}  position & duration {:?} {:?}\r",
+    pub fn write_rradio_status_to_lcd(&mut self, status_of_rradio: &player_status::PlayerStatus) {
+        println!(
+            "channel number {}  position & duration {:?} {:?}\r",
             status_of_rradio.channel_number,
             status_of_rradio.position_and_duration[status_of_rradio.index_to_current_track]
                 .position_ms,
             status_of_rradio.position_and_duration[status_of_rradio.index_to_current_track]
                 .duration_ms
-        );*/
-        let mut text_buffer = TextBuffer::new();
+        );
 
         if let Some(toml_error) = &status_of_rradio.toml_error {
-            text_buffer.write_abortive_error_message_to_entire_buffer(toml_error.as_str());
+            let mut text_buffer = TextBuffer::new();
+
+            text_buffer.write_text_to_lines(toml_error.bytes(), LineNum::Line1, 4);
+            //text_buffer.write_abortive_error_message_to_entire_buffer(toml_error.as_str());
+            self.write_text_buffer_to_lcd(&text_buffer);
         } else {
+            let mut text_buffer = TextBuffer::new();
             match status_of_rradio.running_status.clone() {
                 RunningStatus::Startingup => {
                     Lc::fill_text_buffer_when_starting(&mut text_buffer, status_of_rradio)
@@ -381,20 +382,21 @@ impl Lc {
                     Lc::bad_error_message(&mut text_buffer, status_of_rradio)
                 }
             };
-        }
-        for (line_number, line) in text_buffer
-            .buffer
-            .chunks(NUM_CHARACTERS_PER_LINE)
-            .enumerate()
-        {
-            if let Err(err) = write!(self.lcd_file, "\x1b[Lx0y{line_number};") {
-                // move the cursor to the start of the specified line
-                println!("in write_text_buffer, Failed to write move the cursor : {err}");
-                return;
-            }
-            if let Err(err) = self.lcd_file.write_all(line) {
-                println!("in write_text_buffer, Failed to write text : {err}");
-                return;
+
+            for (line_number, line) in text_buffer
+                .buffer
+                .chunks(NUM_CHARACTERS_PER_LINE)
+                .enumerate()
+            {
+                if let Err(err) = write!(self.lcd_file, "\x1b[Lx0y{line_number};") {
+                    // move the cursor to the start of the specified line
+                    println!("in write_text_buffer, Failed to write move the cursor : {err}");
+                    return;
+                }
+                if let Err(err) = self.lcd_file.write_all(line) {
+                    println!("in write_text_buffer, Failed to write text : {err}");
+                    return;
+                }
             }
         }
     }
@@ -403,12 +405,12 @@ impl Lc {
         text_buffer: &mut TextBuffer,
         status_of_rradio: &player_status::PlayerStatus,
     ) {
-        text_buffer.write_text(
+        text_buffer.write_text_to_buffer(
             get_local_ip_address::get_local_ip_address().bytes(),
             0,
             LINE1_DATA_CHAR_COUNT,
         );
-        text_buffer.write_text(
+        text_buffer.write_text_to_buffer(
             Lc::get_vol_string(status_of_rradio).bytes(),
             LINE1_DATA_CHAR_COUNT,
             VOLUME_CHAR_COUNT,
@@ -424,13 +426,13 @@ impl Lc {
         text_buffer: &mut TextBuffer,
         status_of_rradio: &player_status::PlayerStatus,
     ) {
-        text_buffer.write_text(
+        text_buffer.write_text_to_buffer(
             format!("Station {}", status_of_rradio.channel_number).bytes(),
             0,
             LINE1_DATA_CHAR_COUNT,
         );
 
-        text_buffer.write_text(
+        text_buffer.write_text_to_buffer(
             Lc::get_vol_string(status_of_rradio).bytes(),
             LINE1_DATA_CHAR_COUNT,
             VOLUME_CHAR_COUNT,
@@ -453,7 +455,7 @@ impl Lc {
             text_buffer.write_text_to_single_line("                    ".bytes(), LineNum::Line4);
             text_buffer.write_character_to_single_position(LineNum::Line4, column, character);
         } else {
-            text_buffer.write_text(
+            text_buffer.write_text_to_buffer(
                 format!(
                     "{:>Width$.Width$}",
                     status_of_rradio.buffering_percent,
@@ -480,12 +482,12 @@ impl Lc {
         text_buffer: &mut TextBuffer,
         status_of_rradio: &player_status::PlayerStatus,
     ) {
-        text_buffer.write_text(
+        text_buffer.write_text_to_buffer(
             format!("No station {}", status_of_rradio.channel_number).bytes(),
             0,
             LINE1_DATA_CHAR_COUNT,
         );
-        text_buffer.write_text(
+        text_buffer.write_text_to_buffer(
             Lc::get_vol_string(status_of_rradio).bytes(),
             LINE1_DATA_CHAR_COUNT,
             VOLUME_CHAR_COUNT,
@@ -569,8 +571,8 @@ impl Lc {
         )
     }
 
-    /// writes text_buffer's contents to the LCD without translation
-    pub fn write_text_buffer(&mut self, text_buffer: &TextBuffer) {
+    /// Writes text_buffer's contents to the LCD without translation, starting at line 0; it does not scroll
+    pub fn write_text_buffer_to_lcd(&mut self, text_buffer: &TextBuffer) {
         for (line_number, line) in text_buffer
             .buffer
             .chunks(NUM_CHARACTERS_PER_LINE)

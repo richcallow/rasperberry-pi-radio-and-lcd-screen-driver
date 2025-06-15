@@ -96,17 +96,18 @@ impl Config {
     pub fn from_file(config_file_path: &str) -> Result<Self, String> {
         let config_as_string = std::fs::read_to_string(config_file_path).map_err(|toml_file_read_error| {
             format!(
-                "Could not read the config.toml file {config_file_path:?} used to configure {} and got error {toml_file_read_error}",
+                "{} could'nt read {config_file_path:?} Got {toml_file_read_error}",
                 env!("CARGO_PKG_NAME")
             )
         })?;
 
-        let return_value_as_result: Result<Config, String> =toml::from_str(&config_as_string).map_err(|toml_file_parse_error|{
-            format!(
-                "Could not parse the config.toml file {config_file_path:?} used to configure {} and got error {toml_file_parse_error}",
-                env!("CARGO_PKG_NAME")
-            )
-        });
+        let return_value_as_result: Result<Config, String> = toml::from_str(&config_as_string)
+            .map_err(|toml_file_parse_error| {
+                format!(
+                    "{} could'nt parse {config_file_path:?} Got     {toml_file_parse_error}",
+                    env!("CARGO_PKG_NAME")
+                )
+            });
         //now verify that the specified files exist
         if let Ok(return_value) = &return_value_as_result {
             if let Some(filename_startup) = &return_value.aural_notifications.filename_startup {
