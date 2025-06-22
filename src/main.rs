@@ -11,8 +11,10 @@ use gstreamer::prelude::ElementExtManual;
 use gstreamer_interfaces::PlaybinElement;
 use lcd::{RunningStatus, ScrollData, TextBuffer};
 use player_status::{PlayerStatus, PositionAndDuration};
-use std::task::Poll;
+use std::{task::Poll, time::Instant};
 use sys_mount::UnmountFlags;
+
+use crate::lcd::NUM_CHARACTERS_PER_LINE;
 
 mod get_channel_details;
 mod gstreamer_interfaces;
@@ -104,7 +106,7 @@ async fn main() -> Result<(), String> {
                     let error_message = format!("Unhandled argument  {arg:?}. Valid arguments are -c then the config file name OR -V");
 
                     let mut text_buffer = TextBuffer::new();
-                    text_buffer.write_abortive_error_message_to_entire_buffer(&error_message);
+                    text_buffer.write_text_to_lines(error_message.bytes(), lcd::LineNum::Line1, 4);
                     lcd.write_text_buffer_to_lcd(&text_buffer);
                     return Err(error_message);
                 }
@@ -118,10 +120,6 @@ async fn main() -> Result<(), String> {
 
     let config = read_config::Config::from_file(&config_file_path).unwrap_or_else(|error| {
         toml_error = Some(error);
-        //let mut text_buffer = TextBuffer::new();
-        //text_buffer.write_abortive_error_message_to_entire_buffer(&error);
-        //lcd.write_text_buffer(&text_buffer);
-        //eprintln!("{:?}", error);
         read_config::Config::default()
     });
     println!("conf {:?}", config);
@@ -167,28 +165,11 @@ async fn main() -> Result<(), String> {
             );
 
             let mut some_timer = tokio_stream::wrappers::IntervalStream::new(
-                tokio::time::interval(std::time::Duration::from_millis(3000)),
+                tokio::time::interval(std::time::Duration::from_millis(300)),
             )
             .map(Event::Ticker);
 
-            let scroll_period = tokio::time::Duration::from_millis(1600);
-            let mut last_scroll_time = tokio::time::Instant::now();
-
             loop {
-                //#[allow(clippy::needless_late_init)]
-                let timeout_time;
-
-                match status_of_rradio.running_status {
-                    RunningStatus::NoChannel | RunningStatus::NoChannelRepeated => {
-                        timeout_time = last_scroll_time + std::time::Duration::from_millis(200)
-                        // we are not scrolling, but we want to update the time frequently
-                    }
-                    _ => {
-                        // we  are scrolling, so the timeout has to be right for scrolling
-                        timeout_time = last_scroll_time + scroll_period;
-                    }
-                }
-
                 let event = std::future::poll_fn(|cx| {
                     //First poll the keyboard events source for keyboard events
                     match mapped_keyboard_events.poll_next_unpin(cx) {
@@ -304,22 +285,6 @@ async fn main() -> Result<(), String> {
                                         "returned source type {:?}\r",
                                         channel_file_data.source_type
                                     );
-
-                                    /*if (status_of_rradio.channel_file_data.source_type
-                                        != channel_file_data.source_type)
-                                        | !((channel_file_data.source_type != SourceType::Usb)
-                                            || (channel_file_data.source_type != SourceType::CD))
-                                    {
-                                        println!("unmounting\r ");
-                                        if let Err(error_message) =
-                                            unmount_if_needed(&config, &mut status_of_rradio)
-                                        {
-                                            eprintln!(
-                                                "When unmounting, got error {}",
-                                                error_message
-                                            )
-                                        };
-                                    };*/
 
                                     status_of_rradio.channel_file_data = channel_file_data;
                                     status_of_rradio.artist = String::new();
@@ -485,6 +450,34 @@ async fn main() -> Result<(), String> {
                             };
                         } // else if there is no position we cannot do anything useful
                     }
+                }
+
+                if let Some(new_scroll_position) = lcd.get_scroll_position(
+                    // scroll line 2
+                    status_of_rradio.line_2_data.clone(),
+                    &config,
+                    NUM_CHARACTERS_PER_LINE,
+                ) {
+                    status_of_rradio.line_2_data.scroll_position = new_scroll_position; // we got a new scroll position
+                    status_of_rradio.line_2_data.last_update_time = Instant::now();
+                    // & thus we need to update the scroll time
+                }
+
+                let space_needed_for_buffer =
+                    if status_of_rradio.channel_file_data.source_type == SourceType::UrlList {
+                        3 // if we are playing a stream we need to reserve space for the buffer percent.
+                    } else {
+                        0
+                    };
+                if let Some(new_scroll_position) = lcd.get_scroll_position(
+                    // scroll lines 3 & 4
+                    status_of_rradio.line_34_data.clone(),
+                    &config,
+                    NUM_CHARACTERS_PER_LINE * 2 - space_needed_for_buffer,
+                ) {
+                    status_of_rradio.line_34_data.scroll_position = new_scroll_position; // we got a new scroll position
+                    status_of_rradio.line_34_data.last_update_time = Instant::now();
+                    // & thus we need to update the scroll time
                 }
 
                 lcd.write_rradio_status_to_lcd(&status_of_rradio);

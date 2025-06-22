@@ -347,8 +347,8 @@ pub fn get_usb_details(
 #[repr(C)]
 #[derive(Debug, Default)]
 struct CdToc {
-    first_cd_track: u8, /* start track */
-    last_cd_track: u8,  /* end track */
+    first_cd_track: u8, // start track
+    last_cd_track: u8,  // end track
 }
 
 /// If successful returns the details of the channel as the struct ChannelFileData

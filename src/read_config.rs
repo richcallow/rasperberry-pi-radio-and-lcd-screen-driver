@@ -34,6 +34,8 @@ pub struct Config {
     #[serde(with = "humantime_serde")]
     pub error_recovery_attempt_count_reset_time: Option<Duration>,
 
+    pub scroll: Scroll,
+
     /// Notification sounds
     pub aural_notifications: AuralNotifications,
 
@@ -50,6 +52,15 @@ pub struct Usb {
     pub device: String,
     /// Folder where the USB drive is mounted
     pub mount_folder: String,
+}
+
+/// the paramaters used by the scroll function
+#[derive(Debug, Default, serde::Deserialize)]
+#[serde(default)]
+pub struct Scroll {
+    pub max_scroll: usize,
+    pub min_scroll: usize,
+    pub scroll_period_ms: u64,
 }
 
 /// Notifications allow rradio to play sounds to notify the user of events
@@ -82,6 +93,11 @@ impl Default for Config {
             smart_goto_previous_track_duration: Duration::from_secs(2),
             maximum_error_recovery_attempts: 5,
             error_recovery_attempt_count_reset_time: Some(Duration::from_secs(30)),
+            scroll: Scroll {
+                max_scroll: 14,
+                min_scroll: 6,
+                scroll_period_ms: 1600,
+            },
             aural_notifications: AuralNotifications::default(),
             cd_channel_number: None,
             usb: None,
@@ -94,12 +110,13 @@ impl Config {
     /// returns an error string if it cannot parse the TOML file or
     /// if a file is specified to be played to the user, eg at startup or at the end of a CD or USB stick AND the file is missing.
     pub fn from_file(config_file_path: &str) -> Result<Self, String> {
-        let config_as_string = std::fs::read_to_string(config_file_path).map_err(|toml_file_read_error| {
-            format!(
-                "{} could'nt read {config_file_path:?} Got {toml_file_read_error}",
-                env!("CARGO_PKG_NAME")
-            )
-        })?;
+        let config_as_string =
+            std::fs::read_to_string(config_file_path).map_err(|toml_file_read_error| {
+                format!(
+                    "{} could'nt read {config_file_path:?} Got {toml_file_read_error}",
+                    env!("CARGO_PKG_NAME")
+                )
+            })?;
 
         let return_value_as_result: Result<Config, String> = toml::from_str(&config_as_string)
             .map_err(|toml_file_parse_error| {
@@ -146,3 +163,44 @@ impl Config {
         return_value_as_result
     }
 }
+
+/* sample config file
+#this file is read at startup
+# first log entry affect all modules, except those that explicity have their own level. The levels are in the README
+
+stations_directory = "/boot/playlists3"
+input_timeout = "3s"            # input timeout on the keyboard
+volume_offset = 5               # the ammount the volume changes when going up & down
+initial_volume = 75
+buffering_duration = "20s"
+pause_before_playing_increment = "1s"           # the increment in the pauses before playing when an infinite stream terminates
+max_pause_before_playing  = "10s"                       # maximum value of the pause
+
+smart_goto_previous_track_duration = "4s"
+
+[scroll]
+max_scroll = 14         #  maximum ammount of a scroll in charactters
+min_scroll = 6          # minimuum ammount of a scroll
+scroll_period_ms = 1600 # the time between scrollsin misli-seconds
+
+
+[log_level]
+"rradio::audio_pipeline::controller::buffering" = "trace"
+
+[ping]
+remote_ping_count = 20                                  # number of times the remote server is pinged
+
+[aural_notifications]
+filename_startup =  "/boot/sounds/KDE-Sys-App-Message.mp3"                      # sound played at startup
+filename_error =    "/boot/sounds/KDE-Sys-App-Message.mp3"                      # sound played if there is an error
+filename_sound_at_end_of_playlist =  "/boot/sounds/KDE-Sys-App-Message.mp3"     # beep at end of playlist
+
+
+cd_channel_number = 0
+
+[usb]
+channel_number = 99
+device = "/dev/sda1"
+mount_folder = "//home//pi//mount_folder"
+
+*/

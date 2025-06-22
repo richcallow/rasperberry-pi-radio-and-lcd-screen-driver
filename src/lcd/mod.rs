@@ -5,14 +5,17 @@ The lines below instruct the Pi to use the hd44780 driver & load it
     dtparam=pin_d4=24,pin_d5=23,pin_d6=25,pin_d7=9
 */
 
-use std::{io::Write, time::Instant};
+use std::{
+    io::{Read, Write},
+    time::Instant,
+};
 
+use crate::{get_channel_details, player_status};
 use anyhow::Context;
-
-use crate::player_status;
 
 mod character_pattern;
 mod get_local_ip_address;
+pub mod get_mute_state;
 mod get_temperature;
 mod get_throttled;
 mod get_wifi_strength;
@@ -53,8 +56,8 @@ impl LineNum {
     }
 }
 
-#[derive(Default)]
-struct LcdScreenEncodedText {
+#[derive(Default, Clone)]
+pub struct LcdScreenEncodedText {
     bytes: Vec<u8>,
 }
 
@@ -75,12 +78,12 @@ impl std::fmt::Debug for LcdScreenEncodedText {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ScrollData {
-    text: LcdScreenEncodedText,
-    scroll_position: usize,
-    num_lines: usize,
-    last_update_time: Instant,
+    pub text: LcdScreenEncodedText,
+    pub scroll_position: usize,
+    pub num_lines: usize,
+    pub last_update_time: Instant,
 }
 
 impl ScrollData {
@@ -137,52 +140,6 @@ impl ScrollData {
     pub fn bytes(&self) -> impl Iterator<Item = u8> + '_ {
         self.text.bytes.iter().copied().skip(self.scroll_position)
     }
-
-    pub fn text_equals(&self, other: &Self) -> bool {
-        self.text.bytes == other.text.bytes
-    }
-
-    pub fn fits_onto_one_line(&self) -> bool {
-        self.text.bytes.len() <= NUM_CHARACTERS_PER_LINE
-    }
-
-    pub fn scroll(&mut self) {
-        let length_buffer_in_octets = self.num_lines * NUM_CHARACTERS_PER_LINE;
-
-        if self.text.bytes.len() > length_buffer_in_octets
-            && self.last_update_time.elapsed() > std::time::Duration::from_secs(3)
-        {
-            // We need to scroll
-
-            let increment = self
-                .text
-                .bytes
-                .iter() // Iterate over the octets in the text
-                .enumerate() // We want to know how far we've advanced
-                .take(14) // we want to advance at most 14
-                .skip(6) // we want to advance at least 6
-                .find_map(|(increment, character)| (*character == b' ').then_some(increment)) // Find the position offset where that character is a space
-                .unwrap_or(6); // If we can't find a space, move 6 characters
-
-            self.scroll_position += increment;
-
-            match self.text.bytes.get((self.scroll_position)..) {
-                None => {
-                    // We've scrolled past the end of the text
-
-                    self.scroll_position = 0;
-                }
-                Some(displayed_text) => {
-                    // If we've scrolled almost to the end
-                    if displayed_text.len() < 10 {
-                        self.scroll_position = 0;
-                    }
-                }
-            }
-        } else {
-            // We don't need to scroll
-        }
-    }
 }
 
 #[derive(Debug)] // if we let the programmer copy or clone this, we will get different versions of the buffer, & it is important that there there is only one version of the truth
@@ -215,16 +172,6 @@ impl TextBuffer {
         for (buffer_byte, text_byte) in buffer_bytes.zip(text_bytes) {
             *buffer_byte = text_byte;
         }
-    }
-
-    /// Writes the message to entire buffer & copies it to STDerr
-    pub fn write_abortive_error_message_to_entire_buffer(&mut self, error_message: &str) {
-        self.write_text_to_lines(
-            error_message.bytes(),
-            LineNum::Line1,
-            NUM_CHARACTERS_PER_SCREEN,
-        );
-        eprintln!("{error_message}\r");
     }
 
     /// copies (line_count * NUM_CHARACTERS_PER_LINE) offset by the number of lines into the buffer TextBuffer
@@ -261,7 +208,7 @@ impl TextBuffer {
 
             self.buffer[index] = character;
         } else {
-            println!(
+            eprintln!(
                 "Trying to write character \\x{character:02x} to invalid location: line {line:?}, column {column}"
             );
         }
@@ -345,22 +292,19 @@ impl Lc {
     }
 
     pub fn write_rradio_status_to_lcd(&mut self, status_of_rradio: &player_status::PlayerStatus) {
-        println!(
-            "channel number {}  position & duration {:?} {:?}\r",
-            status_of_rradio.channel_number,
-            status_of_rradio.position_and_duration[status_of_rradio.index_to_current_track]
-                .position_ms,
-            status_of_rradio.position_and_duration[status_of_rradio.index_to_current_track]
-                .duration_ms
-        );
-
         if let Some(toml_error) = &status_of_rradio.toml_error {
             let mut text_buffer = TextBuffer::new();
-
             text_buffer.write_text_to_lines(toml_error.bytes(), LineNum::Line1, 4);
-            //text_buffer.write_abortive_error_message_to_entire_buffer(toml_error.as_str());
             self.write_text_buffer_to_lcd(&text_buffer);
         } else {
+            /*println!(
+                "channel number {}  position & duration {:?} {:?}\r",
+                status_of_rradio.channel_number,
+                status_of_rradio.position_and_duration[status_of_rradio.index_to_current_track]
+                    .position_ms,
+                status_of_rradio.position_and_duration[status_of_rradio.index_to_current_track]
+                    .duration_ms
+            );*/
             let mut text_buffer = TextBuffer::new();
             match status_of_rradio.running_status.clone() {
                 RunningStatus::Startingup => {
@@ -383,18 +327,22 @@ impl Lc {
                 }
             };
 
-            for (line_number, line) in text_buffer
+            for (line_number, line) in text_buffer // for each line
                 .buffer
                 .chunks(NUM_CHARACTERS_PER_LINE)
                 .enumerate()
             {
+                // move to the start of the specified line
                 if let Err(err) = write!(self.lcd_file, "\x1b[Lx0y{line_number};") {
                     // move the cursor to the start of the specified line
-                    println!("in write_text_buffer, Failed to write move the cursor : {err}");
+                    eprintln!(
+                        "in write_rradio_status_to_lcd, Failed to write move the cursor : {err}"
+                    );
                     return;
                 }
+                // & then write the text
                 if let Err(err) = self.lcd_file.write_all(line) {
-                    println!("in write_text_buffer, Failed to write text : {err}");
+                    eprintln!("in write_rradio_status_to_lcd, Failed to write text : {err}");
                     return;
                 }
             }
@@ -422,6 +370,49 @@ impl Lc {
             LineNum::Line4,
         );
     }
+
+    pub fn get_scroll_position(
+        &self,
+        line: ScrollData,
+        config: &crate::read_config::Config, // the data read from rradio's config.toml
+        number_of_available_characters: usize,
+    ) -> Option<usize> {
+        if (line.text.bytes.len() <= number_of_available_characters)
+            || (line.last_update_time.elapsed()
+                < tokio::time::Duration::from_millis(config.scroll.scroll_period_ms))
+        {
+            return None; // we do not need to scroll
+        }
+        // We need to scroll
+
+        let increment = line
+            .text
+            .bytes
+            .iter() // Iterate over the octets in the text
+            .enumerate() // We want to know how far we've advanced
+            .take(config.scroll.max_scroll) // we want to advance at most that many chartacters default 14
+            .skip(config.scroll.min_scroll) // we want to advance at least that many characters default 6
+            .find_map(|(increment, character)| (*character == b' ').then_some(increment)) // Find the position offset where that character is a space
+            .unwrap_or(config.scroll.min_scroll); // If we can't find a space, move 6 characters
+
+        let mut scroll_position = line.scroll_position + increment;
+
+        match line.text.bytes.get((scroll_position)..) {
+            None => {
+                // We've scrolled past the end of the text
+
+                scroll_position = 0;
+            }
+            Some(displayed_text) => {
+                // If we've scrolled almost to the end
+                if displayed_text.len() < 10 {
+                    scroll_position = 0;
+                }
+            }
+        }
+        Some(scroll_position)
+    }
+
     pub fn fill_text_buffer_when_running_normally(
         text_buffer: &mut TextBuffer,
         status_of_rradio: &player_status::PlayerStatus,
@@ -437,35 +428,41 @@ impl Lc {
             LINE1_DATA_CHAR_COUNT,
             VOLUME_CHAR_COUNT,
         );
-        text_buffer.write_text_to_single_line(status_of_rradio.line_2_data.bytes(), LineNum::Line2);
 
+        text_buffer.write_text_to_lines(status_of_rradio.line_2_data.bytes(), LineNum::Line2, 1);
         text_buffer.write_text_to_lines(status_of_rradio.line_34_data.bytes(), LineNum::Line3, 2);
 
-        if status_of_rradio.line_34_data.fits_onto_one_line() {
-            let trimmed_buffer: u8 = (status_of_rradio.buffering_percent)
-                .clamp(0, 99)
-                .try_into()
-                .unwrap(); // 0 to 100 is 101 values, & the screen only handles 100 values, so trim downwards
-                           // the unwrap cannot be called as the min value is 0 & the max is 99 which a U8 can handle
+        if status_of_rradio.channel_file_data.source_type
+            == get_channel_details::SourceType::UrlList
+        {
+            // output the buffer state as we are playing a stream
+            if status_of_rradio.line_34_data.text.bytes.len() < NUM_CHARACTERS_PER_LINE {
+                let trimmed_buffer: u8 = (status_of_rradio.buffering_percent)
+                    .clamp(0, 99)
+                    .try_into()
+                    .unwrap(); // 0 to 100 is 101 values, & the screen only handles 100 values, so trim downwards
+                               // the unwrap cannot be called as the min value is 0 & the max is 99 which a U8 can handle
 
-            let column = usize::from(trimmed_buffer / 5);
+                let column = usize::from(trimmed_buffer / 5);
 
-            let character: u8 = trimmed_buffer % 5;
+                let character: u8 = trimmed_buffer % 5;
 
-            text_buffer.write_text_to_single_line("                    ".bytes(), LineNum::Line4);
-            text_buffer.write_character_to_single_position(LineNum::Line4, column, character);
-        } else {
-            text_buffer.write_text_to_buffer(
-                format!(
-                    "{:>Width$.Width$}",
-                    status_of_rradio.buffering_percent,
-                    Width = 3
-                )
-                .bytes(),
-                NUM_CHARACTERS_PER_SCREEN - 3,
-                3,
-            );
-        };
+                text_buffer
+                    .write_text_to_single_line("                    ".bytes(), LineNum::Line4);
+                text_buffer.write_character_to_single_position(LineNum::Line4, column, character);
+            } else {
+                text_buffer.write_text_to_buffer(
+                    format!(
+                        "{:>Width$.Width$}",
+                        status_of_rradio.buffering_percent,
+                        Width = 3
+                    )
+                    .bytes(),
+                    NUM_CHARACTERS_PER_SCREEN - 3,
+                    3,
+                );
+            };
+        } // it is pointless to output the buffer state for CD drives & USB sticks as it is always 100% 0 0%
     }
 
     pub fn bad_error_message(

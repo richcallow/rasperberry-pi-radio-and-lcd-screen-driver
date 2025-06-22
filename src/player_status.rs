@@ -21,7 +21,7 @@ pub struct PlayerStatus {
     pub gstreamer_state: gstreamer::State,
     pub all_4lines: lcd::ScrollData,
     pub line_2_data: lcd::ScrollData,
-    pub line_34_data: lcd::ScrollData,
+      pub line_34_data: lcd::ScrollData,
     pub channel_file_data: get_channel_details::ChannelFileDataDecoded,
     pub buffering_percent: i32,
     pub usb_is_mounted: bool,

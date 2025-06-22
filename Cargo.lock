@@ -1411,6 +1411,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2b15c43186be67a4fd63bee50d0303afffcef381492ebe2c5d87f324e1b8815c"
 
 [[package]]
+name = "rppal"
+version = "0.22.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c1ce3b019009cff02cb6b0e96e7cc2e5c5b90187dc1a490f8ef1521d0596b026"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "rrr"
 version = "0.1.0"
 dependencies = [
@@ -1436,6 +1445,7 @@ dependencies = [
  "pnet",
  "pnet_datalink",
  "rand",
+ "rppal",
  "serde",
  "socket",
  "substring",
