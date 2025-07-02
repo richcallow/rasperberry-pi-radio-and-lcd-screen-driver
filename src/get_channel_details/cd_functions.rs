@@ -1,4 +1,4 @@
-/// ejects the CD drive, or returns an error string
+/// Ejects the CD drive, or returns an error string
 pub fn eject() -> Result<(), String> {
     let num_cd_drives = eject::discovery::cd_drives().count();
     if num_cd_drives == 0 {

@@ -5,22 +5,23 @@ The lines below instruct the Pi to use the hd44780 driver & load it
     dtparam=pin_d4=24,pin_d5=23,pin_d6=25,pin_d7=9
 */
 
-use std::{
-    io::{Read, Write},
-    time::Instant,
-};
+use std::{io::Write, time::Instant};
 
-use crate::{get_channel_details, player_status};
+use crate::{
+    get_channel_details::{self, SourceType},
+    player_status,
+};
 use anyhow::Context;
 
 mod character_pattern;
 mod get_local_ip_address;
 pub mod get_mute_state;
 mod get_temperature;
-mod get_throttled;
+pub mod get_throttled;
 mod get_wifi_strength;
 
 #[derive(PartialEq, Debug)]
+/// S list of the 4 line numbers on the LCD drive
 pub enum LineNum {
     Line1,
     Line2,
@@ -29,22 +30,28 @@ pub enum LineNum {
 }
 #[derive(Debug, PartialEq, Clone)]
 /// Specifies if we are starting up, in which case we want to see the startup message, shutting down or running normally.
+/// or there is a bad error
 pub enum RunningStatus {
     Startingup,
-    NoChannel,         //user enetered a channel that could not be found
-    NoChannelRepeated, //user enetered at least twice consecutively a channel that could not be found
+    /// User enetered a channel that could not be found
+    NoChannel,
+    /// User entered at least twice consecutively a channel that could not be found
+    NoChannelRepeated, 
     RunningNormally,
     BadErrorMessage,
     ShuttingDown,
 }
 
-pub const NUM_CHARACTERS_PER_LINE: usize = 20; //the display is visually 20 * 4 characters
+/// The display is visually 20 * 4 characters
+pub const NUM_CHARACTERS_PER_LINE: usize = 20; //
 pub const NUM_CHARACTERS_PER_SCREEN: usize = 4 * NUM_CHARACTERS_PER_LINE;
 
+/// Number of characters needed to display the volume (or anything put in place of the volume)
 pub const VOLUME_CHAR_COUNT: usize = 7;
+/// Number of chacters to one first line less the characters needed to display the volume
 pub const LINE1_DATA_CHAR_COUNT: usize = NUM_CHARACTERS_PER_LINE - VOLUME_CHAR_COUNT;
 
-/// encodes the line numbers  on the LCD screen
+/// encodes the line numbers on the LCD screen
 impl LineNum {
     fn into_usize(self) -> usize {
         match self {
@@ -57,8 +64,9 @@ impl LineNum {
 }
 
 #[derive(Default, Clone)]
+/// Characters that have been encoded to use the character set in the LCD's ROM
 pub struct LcdScreenEncodedText {
-    bytes: Vec<u8>,
+    pub bytes: Vec<u8>,
 }
 
 impl std::fmt::Debug for LcdScreenEncodedText {
@@ -79,6 +87,7 @@ impl std::fmt::Debug for LcdScreenEncodedText {
 }
 
 #[derive(Debug, Clone)]
+/// Holds the text, and information on how to display it, namely the scroll position, the number of lines & the time the text was last scrolled.
 pub struct ScrollData {
     pub text: LcdScreenEncodedText,
     pub scroll_position: usize,
@@ -87,7 +96,7 @@ pub struct ScrollData {
 }
 
 impl ScrollData {
-    /// encodes the new text into the LCD screen coding & stores that in text_bytes. Also initialises the scrolling state.
+    /// encodes the new text into the LCD screen character set & stores that in text_bytes. Also initialises the scrolling state.
     pub fn new(text: &str, num_lines: usize) -> Self {
         let mut text_bytes = Vec::new();
 
@@ -124,25 +133,21 @@ impl ScrollData {
     pub fn update_if_changed(&mut self, new_text: &str) {
         let new_scroll_data = Self::new(new_text, self.num_lines); // remember that new initialises the scrolling state.
 
-        println!(
-            "new_scroll_data {:?}   \r\n  old {:?}\r",
-            new_scroll_data, self.text
-        );
-
         if self.text.bytes != new_scroll_data.text.bytes {
             *self = new_scroll_data;
         }
     }
 
     /// Get the text bytes after the scroll position.
-    ///
     /// `impl Iterator<Item = u8> + '_` means it returns some anonymous type which implements Iterator with an Item of u8 and a lifetime of the same lifetime as `self`
     pub fn bytes(&self) -> impl Iterator<Item = u8> + '_ {
         self.text.bytes.iter().copied().skip(self.scroll_position)
     }
 }
 
-#[derive(Debug)] // if we let the programmer copy or clone this, we will get different versions of the buffer, & it is important that there there is only one version of the truth
+#[derive(Debug)]
+// if we let the programmer copy or clone this, we will get different versions of the buffer, & it is important that there there is only one version of the truth
+/// The text buffer used to store text.
 pub struct TextBuffer {
     buffer: [u8; NUM_CHARACTERS_PER_SCREEN],
 }
@@ -197,6 +202,7 @@ impl TextBuffer {
         self.write_text_to_lines(text_bytes, line, 1);
     }
 
+    /// writes a single character to the LCD screen. if there is an error, a message is sent to STDERR
     pub fn write_character_to_single_position(
         &mut self,
         line: LineNum,
@@ -221,18 +227,19 @@ impl Default for TextBuffer {
     }
 }
 
+/// Used to interface to the LCD screen
 pub struct Lc {
     lcd_file: std::fs::File,
 }
 
 impl Lc {
+    /// Initialises the screen & stops the cursor blinking & turns the cursor off
     fn clear_screen(mut lcd_file: impl std::io::Write) {
         if let Err(err) = write!(lcd_file, "\x1b[LI\x1b[Lb\x1b[Lc") {
-            // initialises the screen & stops the cursor blinking & turns the cursor off
             eprintln!("Failed to initialise the screen : {err}");
         }
 
-        // generate the cursors in positions 0 to 7 of the character generator, as the initialisation MIGHt have cleared it
+        // generate the cursors in positions 0 to 7 of the character generator, as the initialisation MIGHT have cleared it
         for char_count in 0..8 {
             let mut out_string = format!("\x1b[LG{:01x}", char_count);
             for col_count in 0..8 {
@@ -291,7 +298,12 @@ impl Lc {
         Self::clear_screen(&mut self.lcd_file);
     }
 
-    pub fn write_rradio_status_to_lcd(&mut self, status_of_rradio: &player_status::PlayerStatus) {
+    /// writes all 4 lines of the LCD screen, extracting the data needed from status_of_rradio
+    pub fn write_rradio_status_to_lcd(
+        &mut self,
+        status_of_rradio: &player_status::PlayerStatus,
+        config: &crate::read_config::Config,
+    ) {
         if let Some(toml_error) = &status_of_rradio.toml_error {
             let mut text_buffer = TextBuffer::new();
             text_buffer.write_text_to_lines(toml_error.bytes(), LineNum::Line1, 4);
@@ -301,7 +313,7 @@ impl Lc {
                 "channel number {}  position & duration {:?} {:?}\r",
                 status_of_rradio.channel_number,
                 status_of_rradio.position_and_duration[status_of_rradio.index_to_current_track]
-                    .position_ms,
+                    .position,
                 status_of_rradio.position_and_duration[status_of_rradio.index_to_current_track]
                     .duration_ms
             );*/
@@ -310,9 +322,11 @@ impl Lc {
                 RunningStatus::Startingup => {
                     Lc::fill_text_buffer_when_starting(&mut text_buffer, status_of_rradio)
                 }
-                RunningStatus::RunningNormally => {
-                    Lc::fill_text_buffer_when_running_normally(&mut text_buffer, status_of_rradio)
-                }
+                RunningStatus::RunningNormally => Lc::fill_text_buffer_when_running_normally(
+                    &mut text_buffer,
+                    status_of_rradio,
+                    config,
+                ),
                 RunningStatus::NoChannel => {
                     Lc::fill_text_buffer_channel_not_found(&mut text_buffer, status_of_rradio)
                 }
@@ -349,6 +363,7 @@ impl Lc {
         }
     }
 
+    /// Fill the text buffer with the start up text before any channel has been selected
     pub fn fill_text_buffer_when_starting(
         text_buffer: &mut TextBuffer,
         status_of_rradio: &player_status::PlayerStatus,
@@ -363,7 +378,10 @@ impl Lc {
             LINE1_DATA_CHAR_COUNT,
             VOLUME_CHAR_COUNT,
         );
-        text_buffer.write_text_to_single_line(Lc::get_current_time_text().bytes(), LineNum::Line3);
+        text_buffer.write_text_to_single_line(
+            Lc::get_current_date_and_time_text().bytes(),
+            LineNum::Line3,
+        );
 
         text_buffer.write_text_to_single_line(
             Lc::get_temperature_and_wifi_strength_text().bytes(),
@@ -371,6 +389,9 @@ impl Lc {
         );
     }
 
+    /// Given a scrollable line get the scroll offset & returns it as an Option(ScrollPosition )
+    /// (or None if the line does not need to scrolled becuase it is short enough or has been scrolled recently)
+    /// Ideally it would return it in ScrollData, but making ScrollData mutable stops compilaton working
     pub fn get_scroll_position(
         &self,
         line: ScrollData,
@@ -413,21 +434,85 @@ impl Lc {
         Some(scroll_position)
     }
 
+    /// Fills the text buffer when we are playing normally (or are paused)
     pub fn fill_text_buffer_when_running_normally(
         text_buffer: &mut TextBuffer,
         status_of_rradio: &player_status::PlayerStatus,
+        config: &crate::read_config::Config,
     ) {
-        text_buffer.write_text_to_buffer(
-            format!("Station {}", status_of_rradio.channel_number).bytes(),
-            0,
-            LINE1_DATA_CHAR_COUNT,
-        );
+        // if playng a CD or a USB mem stick we have a position & a duration
+        // if playing a stream we have a position but the duration is none
+        // if the position is less than x seconds, we display the media type
+
+        let start_line1 = if status_of_rradio.position_and_duration[0]
+            .position
+            .num_milliseconds()
+            < config.time_initial_message_displayed_after_channel_change_as_ms
+        {
+            match status_of_rradio.channel_file_data.source_type {
+                SourceType::CD => "Playing CD".to_string(),
+                SourceType::Usb => format!("USB {}", status_of_rradio.channel_number),
+                _ => format!("Station {}", status_of_rradio.channel_number),
+            }
+        } else {
+            match status_of_rradio.channel_file_data.source_type {
+                SourceType::CD | SourceType::Usb => {
+                    let position_secs = status_of_rradio.position_and_duration
+                        [status_of_rradio.index_to_current_track]
+                        .position
+                        .num_seconds();
+                    if let Some(duration_ms) = status_of_rradio.position_and_duration
+                        [status_of_rradio.index_to_current_track]
+                        .duration_ms
+                    {
+                        let duration_secs = duration_ms / 1000;
+                        let track_index = status_of_rradio.index_to_current_track + 1; // humans count from 1
+                        let track_index_digit_count = if track_index < 10 { 1 } else { 2 };
+                        let position_secs_digit_count = match position_secs {
+                            0..=9 => 1,
+                            10..=99 => 2,
+                            100..=999 => 3,
+                            _ => 4,
+                        };
+
+                        let duration_secs_digit_count = match duration_secs {
+                            0..=9 => 1,
+                            10..=99 => 2,
+                            100..=999 => 3,
+                            _ => 4,
+                        };
+                        let number_of_digits = track_index_digit_count
+                            + position_secs_digit_count
+                            + duration_secs_digit_count;
+
+                        match number_of_digits {
+                            0..=7 => {
+                                format!("{track_index}: {position_secs} of {duration_secs}",)
+                            }
+                            8 => format!("{track_index}:{position_secs} of {duration_secs}",),
+                            9 => {
+                                format!("{track_index}:{position_secs}of {duration_secs}",)
+                            }
+                            10 => {
+                                format!("{track_index}: {position_secs}of{duration_secs}")
+                            }
+                            _ => format!("{track_index}: {position_secs}"),
+                        }
+                    } else {
+                        "error".to_string()
+                    }
+                }
+                _ => get_mute_state::get_mute_state().to_string(),
+            }
+        };
+
+        text_buffer.write_text_to_buffer(start_line1.bytes(), 0, LINE1_DATA_CHAR_COUNT);
 
         text_buffer.write_text_to_buffer(
             Lc::get_vol_string(status_of_rradio).bytes(),
             LINE1_DATA_CHAR_COUNT,
             VOLUME_CHAR_COUNT,
-        );
+        ); // line 1 is now written
 
         text_buffer.write_text_to_lines(status_of_rradio.line_2_data.bytes(), LineNum::Line2, 1);
         text_buffer.write_text_to_lines(status_of_rradio.line_34_data.bytes(), LineNum::Line3, 2);
@@ -436,7 +521,7 @@ impl Lc {
             == get_channel_details::SourceType::UrlList
         {
             // output the buffer state as we are playing a stream
-            if status_of_rradio.line_34_data.text.bytes.len() < NUM_CHARACTERS_PER_LINE {
+            if status_of_rradio.line_34_data.text.bytes.len() <= NUM_CHARACTERS_PER_LINE {
                 let trimmed_buffer: u8 = (status_of_rradio.buffering_percent)
                     .clamp(0, 99)
                     .try_into()
@@ -450,6 +535,13 @@ impl Lc {
                 text_buffer
                     .write_text_to_single_line("                    ".bytes(), LineNum::Line4);
                 text_buffer.write_character_to_single_position(LineNum::Line4, column, character);
+
+                if status_of_rradio.line_34_data.text.bytes.is_empty() {
+                    text_buffer.write_text_to_single_line(
+                        Lc::get_current_date_and_time_text().bytes(),
+                        LineNum::Line3,
+                    );
+                }
             } else {
                 text_buffer.write_text_to_buffer(
                     format!(
@@ -462,9 +554,18 @@ impl Lc {
                     3,
                 );
             };
-        } // it is pointless to output the buffer state for CD drives & USB sticks as it is always 100% 0 0%
+        }
+        // it is pointless to output the buffer state for CD drives & USB sticks as it is always 100% or 0%
+        else if status_of_rradio.line_34_data.text.bytes.len() <= NUM_CHARACTERS_PER_LINE {
+            text_buffer.write_text_to_single_line(
+                Lc::get_current_date_and_time_text().bytes(),
+                LineNum::Line4,
+            );
+        }
     }
 
+    /// Fills the entire LCD screen with the error message stored in status_of_rradio.all_4lines
+    /// & copies to stderr
     pub fn bad_error_message(
         text_buffer: &mut TextBuffer,
         status_of_rradio: &player_status::PlayerStatus,
@@ -489,7 +590,10 @@ impl Lc {
             LINE1_DATA_CHAR_COUNT,
             VOLUME_CHAR_COUNT,
         );
-        text_buffer.write_text_to_single_line(Lc::get_current_time_text().bytes(), LineNum::Line3);
+        text_buffer.write_text_to_single_line(
+            Lc::get_current_date_and_time_text().bytes(),
+            LineNum::Line3,
+        );
 
         text_buffer.write_text_to_single_line(
             Lc::get_temperature_and_wifi_strength_text().bytes(),
@@ -525,6 +629,7 @@ impl Lc {
         }
     }
 
+    /// Fills the supplied text buffer with text to say that the program is shutting down
     pub fn fill_text_buffer_when_shutting_down(text_buffer: &mut TextBuffer) {
         text_buffer.write_text_to_single_line("Ending screen driver".bytes(), LineNum::Line1);
         text_buffer.write_text_to_single_line("Computer not shut".bytes(), LineNum::Line3);
@@ -555,7 +660,7 @@ impl Lc {
     }
 
     /// gets the current date & time
-    pub fn get_current_time_text() -> String {
+    pub fn get_current_date_and_time_text() -> String {
         chrono::Local::now().format("%d %b %y %H:%M:%S").to_string()
     }
 

@@ -1,3 +1,4 @@
+/// Gets the IP adress of the Pi's interface
 pub fn get_local_ip_address() -> String {
     let mut return_value: String = String::from("bad Local IP address");
     let mut got_address = false;
@@ -26,7 +27,7 @@ pub fn get_local_ip_address() -> String {
         }
         use std::thread::sleep;
         use std::time::Duration;
-        sleep(Duration::from_millis(250)); //sleep until the Ethernet interface is up
+        sleep(Duration::from_millis(50)); //sleep until the Ethernet interface is up
     }
     return_value
 }

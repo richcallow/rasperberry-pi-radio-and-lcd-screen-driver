@@ -1,3 +1,4 @@
+/// Contains the bitmaps for the cursor
 pub const BITMAPS: [[u8; 8]; 8] = [
     [
         0b10000, //pattern for topmost row. the 1 specifies that the top left pixel is on, the other zeroes specify that the other topmost pixels are off

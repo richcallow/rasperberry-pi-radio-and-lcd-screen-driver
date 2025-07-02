@@ -33,7 +33,10 @@ pub struct ChannelFileDataDecoded {
     pub organisation: String,
     /// What to play       eg       station_url = "https://dc1.serverse.com/proxy/wiupfvnu?mp=/TradCan\"
     pub station_url: Vec<String>,
+    /// The type of the source, such as URL list, CD, USB or unknown
     pub source_type: SourceType,
+    /// True if the last entry in URL list is a ding.
+    pub last_track_is_a_ding: bool,
 }
 
 /// an enum of errors returned by get_channel_details
@@ -321,20 +324,25 @@ pub fn get_usb_details(
                         )))
                     }
                 }
+                let last_track_is_a_ding;
                 // if we get here everything has worked
                 if let Some(filename_sound_at_end_of_playlist) =
                     &config.aural_notifications.filename_sound_at_end_of_playlist
                 {
                     // add a ding if one has been specified at the end of the list of tracks
                     list_of_wanted_tracks.push(filename_sound_at_end_of_playlist.to_string());
+                    last_track_is_a_ding = true;
+                } else {
+                    last_track_is_a_ding = false;
                 }
 
                 Ok(ChannelFileDataDecoded {
                     organisation: chosen_album // if we remove the first part, we get the singer's name and the album name concatonated together
-                        .substring(length_of_mount_folder_path + 1, chosen_album.len() - 1)
+                        .substring(length_of_mount_folder_path + 1, chosen_album.len() )
                         .to_string(),
                     station_url: list_of_wanted_tracks,
                     source_type: SourceType::Usb,
+                    last_track_is_a_ding,
                 })
             }
             Err(mount_error) => Err(mount_error), // return the error returned by the mount function
@@ -344,7 +352,7 @@ pub fn get_usb_details(
     }
 }
 
-#[repr(C)]
+//#[repr(C)]
 #[derive(Debug, Default)]
 struct CdToc {
     first_cd_track: u8, // start track
@@ -415,20 +423,27 @@ pub fn get_cd_details(
         // the = sign means use last_cd_track  & not stop just beforehand
         station_url.push(format!("cdda://{track_count}"));
     }
-    // if we get here everything has worked, so workout if we need to add a ding if one has been specified at the end of the list of tracks.
+    // if we get here everything has worked, so work out if we need to add a ding if one has been specified at the end of the list of tracks.
+    let last_track_is_a_ding;
     if let Some(filename_sound_at_end_of_playlist) =
         &config.aural_notifications.filename_sound_at_end_of_playlist
     {
         if !station_url.is_empty() {
             // only put a ding if we have found at least one track
-            station_url.push(format!("file://{filename_sound_at_end_of_playlist}"))
+            station_url.push(format!("file://{filename_sound_at_end_of_playlist}"));
+            last_track_is_a_ding = true;
+        } else {
+            last_track_is_a_ding = false;
         }
+    } else {
+        last_track_is_a_ding = false;
     }
 
     Ok(ChannelFileDataDecoded {
         organisation: "CD".to_string(),
         station_url,
         source_type: SourceType::CD,
+        last_track_is_a_ding,
     })
 }
 
@@ -503,6 +518,7 @@ pub fn get_channel_details(
                     organisation: toml_data.organisation,
                     station_url: toml_data.station_url,
                     source_type: SourceType::UrlList,
+                    last_track_is_a_ding: false,
                 });
             }
         }

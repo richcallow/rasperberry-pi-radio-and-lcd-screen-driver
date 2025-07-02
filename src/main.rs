@@ -4,6 +4,7 @@
 #[cfg(not(unix))]
 compile_error!("You must compile this on linux");
 
+use chrono::TimeDelta;
 use futures_util::StreamExt;
 use get_channel_details::{get_channel_details, ChannelErrorEvents, SourceType};
 
@@ -116,13 +117,12 @@ async fn main() -> Result<(), String> {
     };
     println!("Reading from config path = {config_file_path}\r");
 
-    let mut toml_error: Option<String> = None;
-
+    let mut toml_error: Option<String> = None; // a temporary store of the master store; we need a temporary store as we cannot create status_of_rradio until we have read the config file
     let config = read_config::Config::from_file(&config_file_path).unwrap_or_else(|error| {
         toml_error = Some(error);
         read_config::Config::default()
     });
-    println!("conf {:?}", config);
+    println!("conf {:?}\r", config);
     let mut status_of_rradio: PlayerStatus = PlayerStatus::new(&config);
     if let Some(toml_error_message) = toml_error {
         status_of_rradio.toml_error = Some(toml_error_message);
@@ -132,19 +132,19 @@ async fn main() -> Result<(), String> {
     } else {
         status_of_rradio.all_4lines = ScrollData::new("Failed it to intialise gstreamer", 4);
         status_of_rradio.running_status = lcd::RunningStatus::BadErrorMessage;
-        lcd.write_rradio_status_to_lcd(&status_of_rradio);
+        lcd.write_rradio_status_to_lcd(&status_of_rradio, &config);
     };
 
     match gstreamer_interfaces::PlaybinElement::setup(&config) {
         Ok((mut playbin, bus_stream)) => {
-            println!("playbin{:?}    bus stream{:?}", playbin, bus_stream);
+            /*println!("playbin{:?}    bus stream{:?}", playbin, bus_stream);  */
 
             // if Some(filename) can match config.aural_notifications.filename_startup then execute the block
             if let Some(filename) = config.aural_notifications.filename_startup.clone() {
                 status_of_rradio.channel_file_data.station_url = vec![format!("file://{filename}")];
                 if let Err(error_message) = playbin.play_track(&status_of_rradio) {
                     status_of_rradio.all_4lines = ScrollData::new(error_message.as_str(), 4);
-                    lcd.write_rradio_status_to_lcd(&status_of_rradio);
+                    lcd.write_rradio_status_to_lcd(&status_of_rradio, &config);
                 }
             } else {
                 println!("No startup ding wanted");
@@ -202,7 +202,7 @@ async fn main() -> Result<(), String> {
                         let _unmount_result = unmount_if_needed(&config, &mut status_of_rradio);
                         status_of_rradio.running_status = lcd::RunningStatus::ShuttingDown;
                         lcd.clear(); // we are ending the program if we get to here
-                        lcd.write_rradio_status_to_lcd(&status_of_rradio);
+                        lcd.write_rradio_status_to_lcd(&status_of_rradio, &config);
                         break; // if we get here, the program will terminate
                     } //One of the streams has closed, signalling a shutdown of the program, so break out of the main loop
                     Some(Event::Keyboard(keyboard_event)) => match keyboard_event {
@@ -265,12 +265,14 @@ async fn main() -> Result<(), String> {
                                 status_of_rradio.position_and_duration
                                     [status_of_rradio.index_to_current_track] =
                                     PositionAndDuration {
-                                        position_ms: 0,
+                                        position: TimeDelta::zero(),
                                         duration_ms: None,
                                     }
                             }
 
                             status_of_rradio.channel_number = channel_number;
+                            status_of_rradio.line_2_data.update_if_changed("");
+                            status_of_rradio.line_34_data.update_if_changed("");
                             match get_channel_details::get_channel_details(
                                 config.stations_directory.clone(),
                                 channel_number,
@@ -302,12 +304,10 @@ async fn main() -> Result<(), String> {
                                         status_of_rradio.running_status =
                                             RunningStatus::BadErrorMessage;
                                     } else {
-                                        status_of_rradio.line_2_data.update_if_changed(
-                                            status_of_rradio
-                                                .channel_file_data
-                                                .organisation
-                                                .as_str(),
-                                        );
+                                        let line2 = generate_line2(&status_of_rradio);
+                                        status_of_rradio
+                                            .line_2_data
+                                            .update_if_changed(line2.as_str());
                                     }
                                 }
                                 Err(the_error) => {
@@ -345,7 +345,7 @@ async fn main() -> Result<(), String> {
                                     //do not remember we played a ding
                                 }
                             }
-                            println!("status_of_rradio {:?}\r", status_of_rradio);
+                            /*println!("status_of_rradio {:?}\r", status_of_rradio);*/
                         }
                     },
                     Some(Event::GStreamer(gstreamer_message)) => {
@@ -365,12 +365,9 @@ async fn main() -> Result<(), String> {
                                     match tag_name.as_str() {
                                         "title" => {
                                             if let Ok(title) = tag_value.get::<&str>() {
-                                                if status_of_rradio.album != title {
-                                                    status_of_rradio
-                                                        .line_34_data
-                                                        .update_if_changed(title);
-                                                    println!("got new album OR IS IT A TITLE!!! {title:?} {:?}\r", status_of_rradio.line_34_data);
-                                                }
+                                                status_of_rradio
+                                                    .line_34_data
+                                                    .update_if_changed(title);
                                             }
                                         }
                                         "organization" => {
@@ -384,7 +381,7 @@ async fn main() -> Result<(), String> {
                                                     status_of_rradio
                                                         .line_2_data
                                                         .update_if_changed(organization);
-                                                    println!("got new organization!!! {organization:?}\r")
+                                                    //println!("got new organization!!! {organization:?}\r")
                                                 }
                                             }
                                         }
@@ -392,13 +389,17 @@ async fn main() -> Result<(), String> {
                                             if let Ok(artist) = tag_value.get::<&str>() {
                                                 if status_of_rradio.artist != artist {
                                                     status_of_rradio.artist = artist.to_string();
-                                                    println!("got new artist!!! {artist:?}\r")
+                                                    //println!("got new artist!!! {artist:?}\r")
                                                 }
                                             }
                                         }
                                         _ => {}
                                     }
                                 }
+                                let line2 = generate_line2(&status_of_rradio);
+                                status_of_rradio
+                                    .line_2_data
+                                    .update_if_changed(line2.as_str());
                             }
 
                             MessageView::StateChanged(state_changed) => {
@@ -427,7 +428,6 @@ async fn main() -> Result<(), String> {
 
                             _ => {}
                         }
-
                         //if let Some(gst_message_buffering) = gstreamer_message.structure() {
                         //     println!("gst_message_buffering{:?}\r", gst_message_buffering);
                         //} else {
@@ -440,13 +440,16 @@ async fn main() -> Result<(), String> {
                             .query_position::<gstreamer::ClockTime>()
                             .map(gstreamer::ClockTime::mseconds)
                         {
-                            status_of_rradio.position_and_duration
-                                [status_of_rradio.index_to_current_track] = PositionAndDuration {
-                                position_ms,
-                                duration_ms: playbin
-                                    .playbin_element
-                                    .query_duration() // it is an Option as infinite streams do not have a duration
-                                    .map(gstreamer::ClockTime::mseconds),
+                            if let Ok(position_i64) = i64::try_from(position_ms) {
+                                status_of_rradio.position_and_duration
+                                    [status_of_rradio.index_to_current_track] =
+                                    PositionAndDuration {
+                                        position: TimeDelta::milliseconds(position_i64),
+                                        duration_ms: playbin
+                                            .playbin_element
+                                            .query_duration() // it is an Option as infinite streams do not have a duration
+                                            .map(gstreamer::ClockTime::mseconds),
+                                    }
                             };
                         } // else if there is no position we cannot do anything useful
                     }
@@ -480,21 +483,60 @@ async fn main() -> Result<(), String> {
                     // & thus we need to update the scroll time
                 }
 
-                lcd.write_rradio_status_to_lcd(&status_of_rradio);
+                lcd.write_rradio_status_to_lcd(&status_of_rradio, &config);
             } // closing parentheses of loop
         }
         Err(message) => {
             status_of_rradio.all_4lines =
                 ScrollData::new(format!("Failed to get a playbin: {message}").as_str(), 4);
             status_of_rradio.running_status = RunningStatus::BadErrorMessage;
-            lcd.write_rradio_status_to_lcd(&status_of_rradio);
+            lcd.write_rradio_status_to_lcd(&status_of_rradio, &config);
         }
     }
 
     Ok(()) //as at the start we said it returned either "Ok(())" or an error, as nothing has failed, we give the "all worked OK termination" value
 }
 
-/// plays the next track by modulo incrementing status_of_rradio.index_to_current_track
+/// Generates the text for line 2 for the nornmal running case, ie streaming, USB or CD. Adds the throttled state if the Pi is throttled
+fn generate_line2(status_of_rradio: &PlayerStatus) -> String {
+    let mut line2 = match status_of_rradio.channel_file_data.source_type {
+        SourceType::CD => {
+            let mut num_tracks = status_of_rradio.channel_file_data.station_url.len();
+            if status_of_rradio.channel_file_data.last_track_is_a_ding {
+                num_tracks -= 1
+            }
+            format!(
+                "CD track {} of {}",
+                status_of_rradio.channel_number + 1, // +1 as humans start counting at 1, not zero
+                num_tracks
+            )
+        }
+        SourceType::Usb => {
+            let mut num_tracks = status_of_rradio.channel_file_data.station_url.len();
+            if status_of_rradio.channel_file_data.last_track_is_a_ding {
+                num_tracks -= 1
+            }
+            format!(
+                "{} ({} of {})",
+                status_of_rradio.channel_file_data.organisation,
+                status_of_rradio.index_to_current_track + 1, // +1 as humans start counting at 1, not zero
+                num_tracks
+            )
+        }
+        SourceType::UrlList => status_of_rradio.channel_file_data.organisation.to_string(),
+        _ => format!(
+            "Unexpected source type {:?}",
+            status_of_rradio.channel_file_data.source_type,
+        ),
+    };
+    let throttled_status = lcd::get_throttled::is_throttled();
+    if throttled_status.pi_is_throttled {
+        line2 = format!("{} {}", line2, throttled_status.result)
+    };
+    line2
+}
+
+/// Plays the next track by modulo incrementing status_of_rradio.index_to_current_track
 fn next_track(status_of_rradio: &mut PlayerStatus, playbin: &PlaybinElement) {
     status_of_rradio.index_to_current_track = (status_of_rradio.index_to_current_track + 1)
         % status_of_rradio.channel_file_data.station_url.len();
@@ -505,9 +547,10 @@ fn next_track(status_of_rradio: &mut PlayerStatus, playbin: &PlaybinElement) {
         );
         status_of_rradio.running_status = RunningStatus::BadErrorMessage;
     } else {
+        let line2 = generate_line2(status_of_rradio);
         status_of_rradio
             .line_2_data
-            .update_if_changed(status_of_rradio.channel_file_data.organisation.as_str());
+            .update_if_changed(line2.as_str());
     }
 }
 
@@ -530,7 +573,7 @@ fn change_volume(
     }
 }
 
-/// unmounts whatever device is mounted if the mount folder; returns an eror string if it fails
+/// unmounts whatever device is mounted if the mount folder; returns an error string if it fails
 fn unmount_if_needed(
     config: &read_config::Config,
     status_of_rradio: &mut player_status::PlayerStatus,

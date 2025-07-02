@@ -4,6 +4,7 @@ use std::time::Duration;
 
 #[derive(Debug, serde::Deserialize)]
 #[serde(default)] // if any field is missing, use the value specified in the default
+/// Holds all the configuration information read from the TOML configuration file
 pub struct Config {
     /// The folder that stores the stations
     pub stations_directory: String, // eg stations_directory = "/boot/playlists2"
@@ -12,7 +13,7 @@ pub struct Config {
     /// The timeout when entering two digit station indices
     pub input_timeout: Duration, // the duration of the keyboard timeout eg input_timeout = "3s"
 
-    // The change in volume when the user increments or decrements the volume
+    /// The change in volume when the user increments or decrements the volume
     pub volume_offset: i32,
 
     pub initial_volume: i32,
@@ -35,6 +36,8 @@ pub struct Config {
     pub error_recovery_attempt_count_reset_time: Option<Duration>,
 
     pub scroll: Scroll,
+
+    pub time_initial_message_displayed_after_channel_change_as_ms: i64,
 
     /// Notification sounds
     pub aural_notifications: AuralNotifications,
@@ -63,7 +66,7 @@ pub struct Scroll {
     pub scroll_period_ms: u64,
 }
 
-/// Notifications allow rradio to play sounds to notify the user of events
+/// Notifications allows rradio to play sounds to notify the user of events
 #[derive(Debug, Default, serde::Deserialize)]
 #[serde(default)]
 pub struct AuralNotifications {
@@ -93,6 +96,7 @@ impl Default for Config {
             smart_goto_previous_track_duration: Duration::from_secs(2),
             maximum_error_recovery_attempts: 5,
             error_recovery_attempt_count_reset_time: Some(Duration::from_secs(30)),
+            time_initial_message_displayed_after_channel_change_as_ms: 3000,
             scroll: Scroll {
                 max_scroll: 14,
                 min_scroll: 6,

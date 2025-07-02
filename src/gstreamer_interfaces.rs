@@ -1,10 +1,7 @@
 use crate::player_status;
 use glib::object::{Cast, ObjectExt};
 
-use gstreamer::{
-    glib,
-    prelude::{ElementExt},
-};
+use gstreamer::{glib, prelude::ElementExt};
 use gstreamer_audio::prelude::StreamVolumeExt;
 
 /// The normal maximum for gstreamer that will not overload
@@ -15,6 +12,7 @@ pub const VOLUME_MIN: i32 = 0;
 pub const VOLUME_MAX: i32 = 120;
 
 #[derive(Debug)] // we must not enable clone, as, if we do, the previous version is closed and stops playing
+/// The interface used to connect to gstreamer
 pub struct PlaybinElement {
     pub playbin_element: gstreamer::Element,
 }
@@ -110,6 +108,7 @@ impl PlaybinElement {
         Ok((PlaybinElement { playbin_element }, bus)) // this is the return value at the end the function, or put differently, it is rust shorthand for  "return Ok(playbin_element);" as it is after the last statement.
     }
 
+    /// set the state of gstreamer to be the one specified
     pub fn set_state(
         &self,
         new_state: gstreamer::State,
@@ -118,12 +117,12 @@ impl PlaybinElement {
     }
 
     /// Plays the first track aka station specified by player_status
-    /// If it fails the error message is returned as Some ()
+    /// If it fails the error message is returned as an Err(String)
     pub fn play_track(&self, status_of_rradio: &player_status::PlayerStatus) -> Result<(), String> {
-        println!(
+        /*println!(
             "playlist {:?}\r",
             status_of_rradio.channel_file_data.station_url
-        );
+        );*/
 
         match self.playbin_element
                .set_state(gstreamer::State::Null)      // we need to set it to null before we can change the station 

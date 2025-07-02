@@ -1,6 +1,7 @@
 use std::fs::File;
 use std::io::prelude::Read; //needed for .read_to_string
 
+/// returns the Wi-Fi signal strength as a string in dB relative to an arbitary level, or an error string
 pub fn get_wifi_signal_strength() -> String {
     let mut file = match File::open("/proc/net/wireless") {
         Ok(file) => file,

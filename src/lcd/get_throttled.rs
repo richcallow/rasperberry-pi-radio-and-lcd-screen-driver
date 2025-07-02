@@ -27,7 +27,7 @@ pub fn is_throttled() -> ThrottledAsStruct {
 
     return_string = return_string.trim().into();
 
-    // note we couls say "return ThrottledAsStruct {" to be explicit what the return value is.
+    // note we could say "return ThrottledAsStruct {" to be explicit what the return value is.
     ThrottledAsStruct {
         pi_is_throttled: return_string != "throttled=0x0",
         result: return_string,

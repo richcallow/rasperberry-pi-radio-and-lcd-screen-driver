@@ -4,6 +4,7 @@ use futures_util::{FutureExt, StreamExt};
 use tokio::sync::mpsc;
 
 #[derive(Debug)]
+/// An enum of all posssible outputs from the keyboard
 pub enum Event {
     PlayPause,
     EjectCD,
@@ -14,6 +15,7 @@ pub enum Event {
     PlayStation { channel_number: u8 }, // channel_number will be  in the range "00" to "99", giving us the number of the station to play
 }
 
+/// puts the keyboard into raw mode & prepares it to return a series of keyboard events
 pub fn setup_keyboard(
     input_timeout: Duration,
 ) -> tokio_stream::wrappers::UnboundedReceiverStream<Event> {

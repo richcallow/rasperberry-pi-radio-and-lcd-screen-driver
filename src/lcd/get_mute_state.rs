@@ -1,22 +1,24 @@
+use core::fmt;
+
 use rppal::gpio::Gpio;
 
 /// Specifies the state of the DigiAMP+ amplfier
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq)]
 pub enum MuteState {
     Muted,       // the amplifer has been set to be muted
     NotMuted,    // the amplifer has been set to be not muted
     NoAmplifier, // no DigiAMP+ amplfier present AND used.
     ErrorFound,  // got an error & we could not work out if there was a DigiAMP+ amplfier
 }
-impl MuteState {
-    pub fn to_string(&self) -> String {
+impl fmt::Display for MuteState {
+    // the rust-approved way of implementing to_string()
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            MuteState::Muted => "muted",
-            MuteState::NotMuted => "",
-            MuteState::ErrorFound => "mute_error",
-            MuteState::NoAmplifier => "No amplifier",
+            MuteState::Muted => write!(f, "muted"),
+            MuteState::NotMuted => write!(f, ""),
+            MuteState::ErrorFound => write!(f, "mute_error"),
+            MuteState::NoAmplifier => write!(f, "No amplifier"),
         }
-        .to_string()
     }
 }
 
