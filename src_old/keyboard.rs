@@ -50,7 +50,7 @@ pub fn setup_keyboard(
                         let keyboard_event = match key_event.code {
                             // match to find out which key it is
                             crossterm::event::KeyCode::Char('Q' | 'q')
-                            | crossterm::event::KeyCode::Backspace => break, // alternative termination key (crossterm intercepts Control C so we cannot use that to terminate)
+                            | crossterm::event::KeyCode::Backspace => break, // alternative termination key
                             crossterm::event::KeyCode::Enter => Event::PlayPause,
                             crossterm::event::KeyCode::Char('.') => Event::EjectCD,
                             crossterm::event::KeyCode::Char('*') => Event::VolumeUp,

@@ -12,9 +12,9 @@ use crate::{
     player_status,
 };
 use anyhow::Context;
-/*use crossterm::cursor::position;
+use crossterm::cursor::position;
 use nix::NixPath;
-use rppal::uart::Status;*/
+use rppal::uart::Status;
 
 mod character_pattern;
 pub mod get_local_ip_address;
@@ -24,7 +24,7 @@ pub mod get_throttled;
 mod get_wifi_strength;
 
 #[derive(PartialEq, Debug)]
-/// List of the 4 line numbers on the LCD drive
+/// S list of the 4 line numbers on the LCD drive
 pub enum LineNum {
     Line1,
     Line2,
@@ -33,15 +33,15 @@ pub enum LineNum {
 }
 #[derive(Debug, PartialEq, Clone)]
 /// Specifies if we are starting up, in which case we want to see the startup message, shutting down or running normally.
-/// or there is a long message to display
+/// or there is a bad error
 pub enum RunningStatus {
     Startingup,
-    /// User entered a channel that could not be found
+    /// User enetered a channel that could not be found
     NoChannel,
     /// User entered at least twice consecutively a channel that could not be found
     NoChannelRepeated,
     RunningNormally,
-    LongMessageOnAll4Lines,
+    BadErrorMessage,
     ShuttingDown,
 }
 
@@ -104,7 +104,7 @@ impl ScrollData {
         let mut text_bytes = Vec::new();
 
         for one_char in text.chars() {
-            if one_char < '~' && (one_char != '\n') && (one_char != '\r') {
+            if one_char < '~' {
                 text_bytes.push(one_char as u8);
             } else {
                 text_bytes.extend_from_slice(match one_char {
@@ -119,8 +119,6 @@ impl ScrollData {
                     'µ' => &[0xF7], // mu
                     '~' => &[0xF3], // cannot display tilde using the standard character set in GDM2004D.pdf. This is the best we can do.
                     '' => &[0xFF], // <Control>  = 0x80 replaced by splodge
-                    '\n' => &[0xCD], // new line & line feed do not display well, so replace them with a different character
-                    '\r' => &[0xCF], // new line & line feed do not display well, so replace them with a different character
                     _ => unidecode::unidecode_char(one_char).as_bytes(),
                 });
             }
@@ -226,10 +224,17 @@ impl TextBuffer {
     }
 }
 
+impl Default for TextBuffer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Used to interface to the LCD screen
 pub struct Lc {
     lcd_file: std::fs::File,
 }
+
 impl Lc {
     /// Initialises the screen & stops the cursor blinking & turns the cursor off
     fn clear_screen(mut lcd_file: impl std::io::Write) {
@@ -316,8 +321,7 @@ impl Lc {
                     .duration_ms
             );*/
             let mut text_buffer = TextBuffer::new();
-
-            match status_of_rradio.running_status {
+            match status_of_rradio.running_status.clone() {
                 RunningStatus::Startingup => {
                     Lc::fill_text_buffer_when_starting(&mut text_buffer, status_of_rradio)
                 }
@@ -330,13 +334,13 @@ impl Lc {
                     Lc::fill_text_buffer_channel_not_found(&mut text_buffer, status_of_rradio)
                 }
                 RunningStatus::NoChannelRepeated => {
-                    Lc::fill_text_buffer_channel_not_found_twice(&mut text_buffer, status_of_rradio)
+                    Lc::fill_text_buffer_channel_not_found_twice(&mut text_buffer)
                 }
                 RunningStatus::ShuttingDown => {
                     Lc::fill_text_buffer_when_shutting_down(&mut text_buffer)
                 }
-                RunningStatus::LongMessageOnAll4Lines => {
-                    Lc::long_message(&mut text_buffer, status_of_rradio)
+                RunningStatus::BadErrorMessage => {
+                    Lc::bad_error_message(&mut text_buffer, status_of_rradio)
                 }
             };
 
@@ -362,15 +366,22 @@ impl Lc {
         }
     }
 
-    /// Fills the text buffer with the start up text before any channel has been selected
+    /// Fill the text buffer with the start up text before any channel has been selected
     pub fn fill_text_buffer_when_starting(
         text_buffer: &mut TextBuffer,
         status_of_rradio: &player_status::PlayerStatus,
     ) {
-        if status_of_rradio.network_data.is_valid {
-            text_buffer
-                .write_text_to_single_line(status_of_rradio.line_1_data.bytes(), LineNum::Line1);
+        if let Some(local_ip_address) = get_local_ip_address::get_local_ip_address() {
+            text_buffer.write_text_to_buffer(local_ip_address.bytes(), 0, LINE1_DATA_CHAR_COUNT);
+        } else {
+            text_buffer.write_text_to_buffer("Bad IP address".bytes(), 0, LINE1_DATA_CHAR_COUNT);
         }
+
+        text_buffer.write_text_to_buffer(
+            Lc::get_vol_string(status_of_rradio).bytes(),
+            LINE1_DATA_CHAR_COUNT,
+            VOLUME_CHAR_COUNT,
+        );
         text_buffer.write_text_to_single_line(
             Lc::get_current_date_and_time_text().bytes(),
             LineNum::Line3,
@@ -381,6 +392,7 @@ impl Lc {
             LineNum::Line4,
         );
     }
+
     /// Given a scrollable line get the scroll offset & returns it as an Option(ScrollPosition )
     /// (or None if the line does not need to scrolled becuase it is short enough or has been scrolled recently)
     /// Ideally it would return it in ScrollData, but making ScrollData mutable stops compilaton working
@@ -556,17 +568,14 @@ impl Lc {
         }
     }
 
-    /// Fills the entire LCD screen with the long message stored in status_of_rradio.all_4lines
+    /// Fills the entire LCD screen with the error message stored in status_of_rradio.all_4lines
     /// & copies to stderr
-    pub fn long_message(
+    pub fn bad_error_message(
         text_buffer: &mut TextBuffer,
         status_of_rradio: &player_status::PlayerStatus,
     ) {
-        text_buffer.write_text_to_lines(
-            status_of_rradio.all_4lines.bytes(),
-            LineNum::Line1,
-            status_of_rradio.all_4lines.num_lines,
-        );
+        text_buffer.write_text_to_lines(status_of_rradio.all_4lines.bytes(), LineNum::Line1, 4);
+        eprintln!("Status of rrr is{:?}\r", status_of_rradio.running_status);
     }
 
     /// Outputs error message with channel number, IP address, data & time temperature & signal strength;
@@ -595,42 +604,11 @@ impl Lc {
             LineNum::Line4,
         );
     }
-    /// Outputs error message with alternatively (compile time & SSID) or (local IP address & gateway IP address), throttled state & time & the non-ASCII character to prove they display OK.
+    /// Outputs error message with channel number, IP address, data & time temperature & signal strength.
     /// Used when the user selects the same wrong channel twice consecutively
-    pub fn fill_text_buffer_channel_not_found_twice(
-        text_buffer: &mut TextBuffer,
-        status_of_rradio: &player_status::PlayerStatus,
-    ) {
-        let mut show_compile_time_and_ssid = false;
-
-        use std::time::{SystemTime, UNIX_EPOCH};
-        if let Ok(time) = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|_c| "cannot fail as now() must be later than unix epoch")
-        {
-            show_compile_time_and_ssid = ((time.as_secs() / 4) & 1) == 0; // alternate between showing the IP address & showing the compile time
-        }
-
-        if show_compile_time_and_ssid {
-            text_buffer
-                .write_text_to_single_line(compile_time::datetime_str!().bytes(), LineNum::Line1);
-            text_buffer.write_text_to_single_line(
-                status_of_rradio.network_data.ssid.bytes(),
-                LineNum::Line2,
-            );
-        } else {
-            {
-                text_buffer.write_text_to_single_line(
-                    format!("local{}", status_of_rradio.network_data.local_ip_address).bytes(),
-                    LineNum::Line1,
-                );
-                text_buffer.write_text_to_single_line(
-                    format!("G'way{}", status_of_rradio.network_data.gateway_ip_address).bytes(),
-                    LineNum::Line2,
-                );
-            }
-        }
-
+    pub fn fill_text_buffer_channel_not_found_twice(text_buffer: &mut TextBuffer) {
+        text_buffer
+            .write_text_to_single_line(compile_time::datetime_str!().bytes(), LineNum::Line1);
         text_buffer
             .write_text_to_single_line(Lc::get_throttled_status_and_time().bytes(), LineNum::Line3);
         text_buffer.write_text_to_single_line(
@@ -662,35 +640,25 @@ impl Lc {
     }
 
     /// returns the volume as a String if playing, if not the gstreamer state as a String
-    pub fn get_vol_string(status_of_rradio: &player_status::PlayerStatus) -> String {
-        //if status_of_rradio.gstreamer_state == gstreamer::State::Playing {
-        match status_of_rradio.gstreamer_state {
-            gstreamer::State::Playing | gstreamer::State::Null => {
-                let number_of_digits = match status_of_rradio.current_volume {
-                    99.. => 4,
-                    9.. => 3,
-                    _ => 2,
-                };
-
-                format!(
-                    "Vol{:>Width$.Width$}",
-                    status_of_rradio.current_volume,
-                    Width = number_of_digits
-                )
-            }
-            //} else {
-            _ => {
-                format!(
-                    "{}",
-                    match status_of_rradio.gstreamer_state {
-                        gstreamer::State::VoidPending => "Void",
-                        gstreamer::State::Paused => "Paused",
-                        gstreamer::State::Playing => "Playing", // never actually used due to the previous if statement
-                        gstreamer::State::Ready => "Ready",
-                        gstreamer::State::Null => "Null",
-                    }
-                )
-            }
+    fn get_vol_string(status_of_rradio: &player_status::PlayerStatus) -> String {
+        if status_of_rradio.gstreamer_state == gstreamer::State::Playing {
+            format!(
+                "Vol{:>Width$.Width$}",
+                status_of_rradio.current_volume,
+                Width = VOLUME_CHAR_COUNT - 3
+            )
+        } else {
+            format!(
+                "{:>width$.width$}",
+                match status_of_rradio.gstreamer_state {
+                    gstreamer::State::VoidPending => "Void",
+                    gstreamer::State::Paused => "Paused",
+                    gstreamer::State::Playing => "Playing",
+                    gstreamer::State::Ready => "Ready",
+                    gstreamer::State::Null => "Null",
+                },
+                width = VOLUME_CHAR_COUNT
+            )
         }
     }
 

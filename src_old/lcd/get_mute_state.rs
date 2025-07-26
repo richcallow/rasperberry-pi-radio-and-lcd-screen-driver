@@ -26,8 +26,7 @@ impl fmt::Display for MuteState {
 pub fn get_mute_state() -> MuteState {
     // this command sets the port low  raspi-gpio set 22 op dl
     // this command sets the port high raspi-gpio set 22 op dh
-    /// GPIO 22 controls whether or not the DigiAMP+ amplifier is muted
-    const MUTE_PORT: u8 = 22;
+    const MUTE_PORT: u8 = 22; // GPIO 22 controls whether or not the DigiAMP+ amplifier is muted
     let all_gpios_and_errors = Gpio::new();
     match all_gpios_and_errors {
         Ok(gpios) => match gpios.get(MUTE_PORT) {
@@ -42,12 +41,12 @@ pub fn get_mute_state() -> MuteState {
                 }
             }
             Err(pin22_err) => {
-                eprintln!("Got error {} when trying to get mute pin", pin22_err);
+                println!("Got error {} when trying to get mute pin", pin22_err);
                 MuteState::ErrorFound
             }
         },
         Err(err_message) => {
-            eprintln!(
+            println!(
                 "When trying to get a GPIO pin got the error {}",
                 err_message
             );

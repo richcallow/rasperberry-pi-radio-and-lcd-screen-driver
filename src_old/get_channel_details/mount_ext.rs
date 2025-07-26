@@ -37,12 +37,9 @@ pub fn mount(
                     Some(OS_ERROR_NO_SUCH_FILE_OR_DIRECTORY) => {
                         Err(ChannelErrorEvents::NoUSBDevice)
                     }
-                    Some(OS_RESOURCE_BUSY) => {
-                        // as it is already mounted, we do not need to do mount it again
-                        status_of_rradio.usb_is_mounted = true;
-                        status_of_rradio.channel_file_data.source_type = SourceType::Usb;
-                        Ok(())
-                    }
+                    Some(OS_RESOURCE_BUSY) => Err(ChannelErrorEvents::UsbMountMountError(
+                        "USB already mounted".to_string(),
+                    )),
                     Some(error_number) => Err(ChannelErrorEvents::UsbMountMountError(format!(
                         "Got Operating System error {} ",
                         error_number

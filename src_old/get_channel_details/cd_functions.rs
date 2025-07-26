@@ -15,7 +15,7 @@ pub fn eject() -> Result<(), String> {
 
     cdrom.eject().map_err(|error_message| {
         format!(
-            "Got the following error when ejecting the CD{:?}",
+            "got the following error when ejecting the CD{:?}",
             error_message
         )
     })
