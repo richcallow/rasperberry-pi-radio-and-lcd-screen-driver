@@ -1,7 +1,7 @@
 use std::fs::File;
 use std::io::prelude::Read; //needed for .read_to_string
 
-/// gets the temperature in degrees Centrigrade; negative numbers mean that there was an error
+/// gets the temperature in degrees Centrigrade; negative numbers mean that there was an error 
 pub fn get_cpu_temperature() -> i32 {
     let mut file = match File::open("/sys/class/thermal/thermal_zone0/temp") {
         Ok(file) => file,
@@ -18,7 +18,7 @@ pub fn get_cpu_temperature() -> i32 {
 
     match file.read_to_string(&mut cpu_temperature) {
         Err(why) => {
-            eprintln!("Couldn't read the temperature from the pseduo file {}", why);
+            eprintln!("couldn't read the temperature from the pseduo file {}", why);
             -1
         }
         Ok(_file_size) => {
@@ -28,7 +28,7 @@ pub fn get_cpu_temperature() -> i32 {
             {
                 Ok(milli_temp) => milli_temp / 1000, //divide by 1000 to convert to C from milli-C and return the temperature
                 Err(err) => {
-                    eprintln!("Got error {} when parsing the temperature", err);
+                    eprintln!("got err {} when parsing the temperature", err);
                     -3
                 }
             }

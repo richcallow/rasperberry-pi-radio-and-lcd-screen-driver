@@ -87,14 +87,14 @@ impl PlaybinElement {
             .ok_or("Failed to unset the unwanted gstreamer flags")?; // question mark says "if there is an error,  return from here with the string specified, otherwise continue"
 
         playbin_element.set_property_from_value("flags", &flags);
-        // at this point we have a playbin element with the wanted flags , ie the default with "text" & "video" removed
-        //(actually "Deinterlace video if necessary" & "Use software color balance" remain)
+        // at this point we have a playbin element with the wanted flags , ie the default with "text" & "video" removed (actually "Deinterlace video if necessary" & "Use software color balance" remain)
 
         if let Some(buffering_duration) = config.buffering_duration {
             // the duration is specified in the config file
 
             if let Ok(duration_as_nanos) = i64::try_from(buffering_duration.as_nanos()) {
                 playbin_element.set_property("buffer-duration", duration_as_nanos);
+                println!("Set the buffer duration to {duration_as_nanos} ns\r")
             } else {
                 eprintln!("Failed to set the buffer duration")
             }
@@ -105,7 +105,7 @@ impl PlaybinElement {
             .ok_or("The gstreamer playbin's message bus is missing")?
             .stream();
 
-        Ok((PlaybinElement { playbin_element }, bus))
+        Ok((PlaybinElement { playbin_element }, bus)) // this is the return value at the end the function, or put differently, it is rust shorthand for  "return Ok(playbin_element);" as it is after the last statement.
     }
 
     /// set the state of gstreamer to be the one specified
@@ -119,24 +119,19 @@ impl PlaybinElement {
     /// Plays the first track aka station specified by player_status
     /// If it fails the error message is returned as an Err(String)
     pub fn play_track(&self, status_of_rradio: &player_status::PlayerStatus) -> Result<(), String> {
+        /*println!(
+            "playlist {:?}\r",
+            status_of_rradio.channel_file_data.station_url
+        );*/
+
         match self.playbin_element
                .set_state(gstreamer::State::Null)      // we need to set it to null before we can change the station 
         {
         Ok(_state_change_success) => {
-                if status_of_rradio.index_to_current_track >= status_of_rradio.channel_file_data.station_urls.len(){
-                    // as index_to_current_track is a usize, there is no need to check it it is not negative
-                            println!(
-            "playlist {:?}\r",
-            status_of_rradio.channel_file_data.station_urls
-        );
-                   return  Err(format!("Index to tracks out of bounds; it is {} and the list has {} elements", 
-                   status_of_rradio.index_to_current_track, status_of_rradio.channel_file_data.station_urls.len()));
-                }
                 self.playbin_element.set_property(
                     "uri",              // if "uri" does not exist, it panics, but that does not seem to be anything that can be done about it.
-                    &status_of_rradio.channel_file_data.station_urls[status_of_rradio.index_to_current_track],
+                    &status_of_rradio.channel_file_data.station_url[status_of_rradio.index_to_current_track],
                 );
-
                 match self.playbin_element //clone here makes it stop working
                     .set_state(gstreamer::State::Playing)
                 {

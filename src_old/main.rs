@@ -10,14 +10,12 @@ use get_channel_details::{get_channel_details, ChannelErrorEvents, SourceType};
 
 use gstreamer::prelude::ElementExtManual;
 use gstreamer_interfaces::PlaybinElement;
-
+use lcd::{RunningStatus, ScrollData, TextBuffer};
 use player_status::{PlayerStatus, PositionAndDuration};
 use std::{task::Poll, time::Instant};
+use sys_mount::UnmountFlags;
 
-//use crate::lcd::NUM_CHARACTERS_PER_LINE; // if this line is not commented out, we can use NUM_CHARACTERS_PER_LINE without prefixing it with lcd::
-use lcd::{RunningStatus, ScrollData, TextBuffer};
-
-use crate::lcd::get_local_ip_address;
+use crate::lcd::NUM_CHARACTERS_PER_LINE;
 
 mod get_channel_details;
 mod gstreamer_interfaces;
@@ -61,6 +59,24 @@ enum Event {
 
 // http://192.168.0.2:8082
 
+/// gets the local IP address by calling lcd::get_local_ip_address::get_local_ip_address multiple times.
+/// returns true if it works. Updates status_of_rradio.ip_address_or_error_as_string with its success or otherwise
+fn get_local_ip_address(status_of_rradio: &mut PlayerStatus) -> bool {
+    for _count in 0..100 {
+        if let Some(ip_address) = lcd::get_local_ip_address::get_local_ip_address1() {
+            status_of_rradio.ip_address_or_error_as_string = ip_address;
+
+            return true;
+        }
+
+        use std::thread::sleep;
+        use std::time::Duration;
+        sleep(Duration::from_millis(50)); //sleep until the Ethernet interface is up
+    }
+    status_of_rradio.ip_address_or_error_as_string = "Bad IP address".to_string();
+    false
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), String> {
     //    we need async as for example, we will need to wait for input from gstreamer or the keyboard
@@ -84,18 +100,12 @@ async fn main() -> Result<(), String> {
     https://docs.rs/tokio/latest/tokio/io/unix/struct.AsyncFd.html#method.new
     */
 
-    //    use std::process;
-    //
-    //println!("My pid is {}", process::id());
-
     let mut lcd;
     match lcd::Lc::new() {
         Ok(success) => lcd = success,
         Err(lcd_error) => {
-            return Err(format!(
-                "Could not open the LCD driver. Got error {}",
-                lcd_error
-            ));
+            eprintln!("{lcd_error:?}");
+            return Err("Could not open the LCD driver".to_string());
         }
     }
 
@@ -123,6 +133,7 @@ async fn main() -> Result<(), String> {
         }
         config_file_path_from_args
     };
+    println!("Reading from config path = {config_file_path}\r");
 
     let mut toml_error: Option<String> = None; // a temporary store of the master store; we need a temporary store as we cannot create status_of_rradio until we have read the config file
     let config = read_config::Config::from_file(&config_file_path).unwrap_or_else(|error| {
@@ -132,45 +143,32 @@ async fn main() -> Result<(), String> {
     println!("conf {:?}\r", config);
     let mut status_of_rradio: PlayerStatus = PlayerStatus::new(&config);
     if let Some(toml_error_message) = toml_error {
-        // if we got an error we should display it; hopefully, toml_error == none
         status_of_rradio.toml_error = Some(toml_error_message);
     }
 
-    // first assume that the WiFi is working and has a valid SSID & Password
-    status_of_rradio.update_network_data(&mut lcd, &config);
+    let got_ip_address = get_local_ip_address(&mut status_of_rradio);
 
-    //get_local_ip_address::get_wifi_data(&mut status_of_rradio, &mut lcd, &config);
-
-    if !status_of_rradio.network_data.is_valid {
-        match lcd::get_local_ip_address::set_up_wifi_password(
-            &mut status_of_rradio,
-            &mut lcd,
-            &config,
-        ) {
-            Ok(()) => {}
-            Err(error_message) => {
-                status_of_rradio
-                    .all_4lines
-                    .update_if_changed(error_message.as_str());
-            }
-        };
+    if !got_ip_address {
+        // the wifi is not working
+        lcd::get_local_ip_address::set_up_wifi();
+        get_local_ip_address(&mut status_of_rradio);
     }
     lcd.write_rradio_status_to_lcd(&status_of_rradio, &config);
 
-    if gstreamer::init().is_err() {
+    if let Ok(_worked_ok) = gstreamer::init() {
+    } else {
         status_of_rradio.all_4lines = ScrollData::new("Failed it to intialise gstreamer", 4);
-        status_of_rradio.running_status = lcd::RunningStatus::LongMessageOnAll4Lines;
+        status_of_rradio.running_status = lcd::RunningStatus::BadErrorMessage;
         lcd.write_rradio_status_to_lcd(&status_of_rradio, &config);
     };
 
-    status_of_rradio.line_1_data = ScrollData::new(
+    status_of_rradio.line_1_data.update_if_changed(
         format!(
             "{} {}",
-            status_of_rradio.network_data.local_ip_address,
+            status_of_rradio.ip_address_or_error_as_string,
             lcd::Lc::get_vol_string(&status_of_rradio)
         )
         .as_str(),
-        1,
     );
 
     match gstreamer_interfaces::PlaybinElement::setup(&config) {
@@ -179,9 +177,7 @@ async fn main() -> Result<(), String> {
 
             // if Some(filename) can match config.aural_notifications.filename_startup then execute the block
             if let Some(filename) = config.aural_notifications.filename_startup.clone() {
-                status_of_rradio.channel_file_data.station_urls =
-                    vec![format!("file://{filename}")];
-                status_of_rradio.index_to_current_track = 0;
+                status_of_rradio.channel_file_data.station_url = vec![format!("file://{filename}")];
                 if let Err(error_message) = playbin.play_track(&status_of_rradio) {
                     status_of_rradio.all_4lines = ScrollData::new(error_message.as_str(), 4);
                     lcd.write_rradio_status_to_lcd(&status_of_rradio, &config);
@@ -255,7 +251,7 @@ async fn main() -> Result<(), String> {
                                 };
                             if let Err(_error_message) = playbin.set_state(new_state) {
                                 eprintln!(
-                                    "Could not set the gstreamer state when user hit play//pause\r"
+                                    "Could not set the gstreamer state when user hit play//pause"
                                 )
                             }
                         }
@@ -270,7 +266,7 @@ async fn main() -> Result<(), String> {
                             status_of_rradio.line_1_data.update_if_changed(
                                 format!(
                                     "{} {}",
-                                    status_of_rradio.network_data.local_ip_address,
+                                    status_of_rradio.ip_address_or_error_as_string,
                                     lcd::Lc::get_vol_string(&status_of_rradio)
                                 )
                                 .as_str(),
@@ -281,7 +277,7 @@ async fn main() -> Result<(), String> {
                             status_of_rradio.line_1_data.update_if_changed(
                                 format!(
                                     "{} {}",
-                                    status_of_rradio.network_data.local_ip_address,
+                                    status_of_rradio.ip_address_or_error_as_string,
                                     lcd::Lc::get_vol_string(&status_of_rradio)
                                 )
                                 .as_str(),
@@ -289,21 +285,20 @@ async fn main() -> Result<(), String> {
                         }
                         keyboard::Event::PreviousTrack => {
                             println!("PreviousTrack\r");
-                            status_of_rradio.running_status = RunningStatus::RunningNormally; //at least hope this is true
                             status_of_rradio.index_to_current_track = (status_of_rradio
                                 .index_to_current_track
-                                + status_of_rradio.channel_file_data.station_urls.len()
+                                + status_of_rradio.channel_file_data.station_url.len()
                                 - 1)
-                                % status_of_rradio.channel_file_data.station_urls.len(); // % is a remainder operator not modulo
+                                % status_of_rradio.channel_file_data.station_url.len(); // % is a remainder operator not modulo
                             if let Err(playbin_error_message) =
                                 playbin.play_track(&status_of_rradio)
                             {
-                                status_of_rradio.all_4lines.update_if_changed(
+                                status_of_rradio.all_4lines = ScrollData::new(
                                     format!("When playing a track got {playbin_error_message}")
                                         .as_str(),
+                                    4,
                                 );
-                                status_of_rradio.running_status =
-                                    RunningStatus::LongMessageOnAll4Lines;
+                                status_of_rradio.running_status = RunningStatus::BadErrorMessage;
                             } else {
                                 status_of_rradio.line_2_data.update_if_changed(
                                     status_of_rradio.channel_file_data.organisation.as_str(),
@@ -340,10 +335,10 @@ async fn main() -> Result<(), String> {
                                     status_of_rradio.toml_error = None; // clear out the toml error if there is one
                                     status_of_rradio.running_status =
                                         lcd::RunningStatus::RunningNormally;
-                                    /*println!(
+                                    println!(
                                         "returned source type {:?}\r",
                                         channel_file_data.source_type
-                                    );*/
+                                    );
 
                                     status_of_rradio.channel_file_data = channel_file_data;
                                     status_of_rradio.artist = String::new();
@@ -351,14 +346,15 @@ async fn main() -> Result<(), String> {
                                     if let Err(playbin_error_message) =
                                         playbin.play_track(&status_of_rradio)
                                     {
-                                        status_of_rradio.all_4lines.update_if_changed(
+                                        status_of_rradio.all_4lines = ScrollData::new(
                                             format!(
                                                 "When playing a track got {playbin_error_message}"
                                             )
                                             .as_str(),
+                                            4,
                                         );
                                         status_of_rradio.running_status =
-                                            RunningStatus::LongMessageOnAll4Lines;
+                                            RunningStatus::BadErrorMessage;
                                     } else {
                                         let line2 = generate_line2(&status_of_rradio);
                                         status_of_rradio
@@ -367,10 +363,7 @@ async fn main() -> Result<(), String> {
                                     }
                                 }
                                 Err(the_error) => {
-                                    println!(
-                                        "got channel detail error {:?}\r",
-                                        &the_error.to_lcd_screen()
-                                    );
+                                    println!("got channel detail error {:?}\r", &the_error);
 
                                     if let ChannelErrorEvents::CouldNotFindChannelFile = the_error {
                                         println!(
@@ -384,7 +377,6 @@ async fn main() -> Result<(), String> {
                                             && (status_of_rradio.channel_number
                                                 == status_of_rradio.previous_channel_number)
                                         {
-                                            status_of_rradio.toml_error = None; // clear the TOML error out, the user must have seen it by now
                                             status_of_rradio.running_status =
                                                 lcd::RunningStatus::NoChannelRepeated;
                                         } else {
@@ -396,19 +388,16 @@ async fn main() -> Result<(), String> {
                                             &config.aural_notifications.filename_error
                                         {
                                             // play a ding if one has been specified
-                                            status_of_rradio.channel_file_data.station_urls =
+                                            status_of_rradio.channel_file_data.station_url =
                                                 vec![format!("file://{ding_filename}")];
-                                            status_of_rradio.index_to_current_track = 0;
                                             let _ignore_error_if_beep_fails =
                                                 playbin.play_track(&status_of_rradio);
-                                            status_of_rradio.index_to_current_track = 0;
                                         }
                                     } else {
-                                        status_of_rradio
-                                            .all_4lines
-                                            .update_if_changed(the_error.to_lcd_screen().as_str());
+                                        status_of_rradio.all_4lines =
+                                            ScrollData::new(the_error.to_lcd_screen().as_str(), 4);
                                         status_of_rradio.running_status =
-                                            RunningStatus::LongMessageOnAll4Lines;
+                                            RunningStatus::BadErrorMessage;
                                     };
                                     //status_of_rradio.initialise_for_new_station();
                                     //do not remember we played a ding
@@ -479,25 +468,19 @@ async fn main() -> Result<(), String> {
                                     // we only want stage changes from playbin0
                                 }) {
                                     status_of_rradio.gstreamer_state = state_changed.current();
-                                    /*println!("statechanged {:?}\r", status_of_rradio);*/
+                                    println!("statechanged {:?}\r", status_of_rradio);
                                     change_volume(0, &config, &mut status_of_rradio, &mut playbin);
                                 }
                             }
 
                             MessageView::Eos(_end_of_stream) => {
-                                if status_of_rradio.channel_file_data.station_urls.len() > 1 {
+                                if status_of_rradio.channel_file_data.station_url.len() > 1 {
                                     next_track(&mut status_of_rradio, &playbin);
                                 }
                             }
 
-                            MessageView::Error(gstreamer_error) => {
-                                println!("gstreamer error {:?}\r", gstreamer_error);
-                                status_of_rradio.all_4lines = ScrollData::new(
-                                    format!("Gstreamer error {:?}\r", gstreamer_error).as_str(),
-                                    4,
-                                );
-                                status_of_rradio.running_status =
-                                    RunningStatus::LongMessageOnAll4Lines;
+                            MessageView::Error(error) => {
+                                println!("the error {:?}\r", error)
                             }
 
                             _ => {}
@@ -533,7 +516,7 @@ async fn main() -> Result<(), String> {
                     // scroll line 1
                     status_of_rradio.line_1_data.clone(),
                     &config,
-                    lcd::NUM_CHARACTERS_PER_SCREEN,
+                    NUM_CHARACTERS_PER_LINE,
                 ) {
                     status_of_rradio.line_1_data.scroll_position = new_scroll_position; // we got a new scroll position
                     status_of_rradio.line_1_data.last_update_time = Instant::now();
@@ -544,7 +527,7 @@ async fn main() -> Result<(), String> {
                     // scroll line 2
                     status_of_rradio.line_2_data.clone(),
                     &config,
-                    lcd::NUM_CHARACTERS_PER_LINE,
+                    NUM_CHARACTERS_PER_LINE,
                 ) {
                     status_of_rradio.line_2_data.scroll_position = new_scroll_position; // we got a new scroll position
                     status_of_rradio.line_2_data.last_update_time = Instant::now();
@@ -561,21 +544,10 @@ async fn main() -> Result<(), String> {
                     // scroll lines 3 & 4
                     status_of_rradio.line_34_data.clone(),
                     &config,
-                    lcd::NUM_CHARACTERS_PER_LINE * 2 - space_needed_for_buffer,
+                    NUM_CHARACTERS_PER_LINE * 2 - space_needed_for_buffer,
                 ) {
                     status_of_rradio.line_34_data.scroll_position = new_scroll_position; // we got a new scroll position
                     status_of_rradio.line_34_data.last_update_time = Instant::now();
-                    // & thus we need to update the scroll time
-                }
-
-                if let Some(new_scroll_position) = lcd.get_scroll_position(
-                    // scroll all 4 lines
-                    status_of_rradio.all_4lines.clone(),
-                    &config,
-                    lcd::NUM_CHARACTERS_PER_LINE * 4,
-                ) {
-                    status_of_rradio.all_4lines.scroll_position = new_scroll_position; // we got a new scroll position
-                    status_of_rradio.all_4lines.last_update_time = Instant::now();
                     // & thus we need to update the scroll time
                 }
 
@@ -583,10 +555,9 @@ async fn main() -> Result<(), String> {
             } // closing parentheses of loop
         }
         Err(message) => {
-            status_of_rradio
-                .all_4lines
-                .update_if_changed(format!("Failed to get a playbin: {message}").as_str());
-            status_of_rradio.running_status = RunningStatus::LongMessageOnAll4Lines;
+            status_of_rradio.all_4lines =
+                ScrollData::new(format!("Failed to get a playbin: {message}").as_str(), 4);
+            status_of_rradio.running_status = RunningStatus::BadErrorMessage;
             lcd.write_rradio_status_to_lcd(&status_of_rradio, &config);
         }
     }
@@ -598,7 +569,7 @@ async fn main() -> Result<(), String> {
 fn generate_line2(status_of_rradio: &PlayerStatus) -> String {
     let mut line2 = match status_of_rradio.channel_file_data.source_type {
         SourceType::CD => {
-            let mut num_tracks = status_of_rradio.channel_file_data.station_urls.len();
+            let mut num_tracks = status_of_rradio.channel_file_data.station_url.len();
             if status_of_rradio.channel_file_data.last_track_is_a_ding {
                 num_tracks -= 1
             }
@@ -609,7 +580,7 @@ fn generate_line2(status_of_rradio: &PlayerStatus) -> String {
             )
         }
         SourceType::Usb => {
-            let mut num_tracks = status_of_rradio.channel_file_data.station_urls.len();
+            let mut num_tracks = status_of_rradio.channel_file_data.station_url.len();
             if status_of_rradio.channel_file_data.last_track_is_a_ding {
                 num_tracks -= 1
             }
@@ -628,21 +599,21 @@ fn generate_line2(status_of_rradio: &PlayerStatus) -> String {
     };
     let throttled_status = lcd::get_throttled::is_throttled();
     if throttled_status.pi_is_throttled {
-        line2 = format!("{line2} {}", throttled_status.result)
+        line2 = format!("{} {}", line2, throttled_status.result)
     };
     line2
 }
 
 /// Plays the next track by modulo incrementing status_of_rradio.index_to_current_track
 fn next_track(status_of_rradio: &mut PlayerStatus, playbin: &PlaybinElement) {
-    status_of_rradio.running_status = RunningStatus::RunningNormally; // at least hope that this is true
     status_of_rradio.index_to_current_track = (status_of_rradio.index_to_current_track + 1)
-        % status_of_rradio.channel_file_data.station_urls.len();
+        % status_of_rradio.channel_file_data.station_url.len();
     if let Err(playbin_error_message) = playbin.play_track(status_of_rradio) {
-        status_of_rradio.all_4lines.update_if_changed(
+        status_of_rradio.all_4lines = ScrollData::new(
             format!("When playing a track got {playbin_error_message}").as_str(),
+            4,
         );
-        status_of_rradio.running_status = RunningStatus::LongMessageOnAll4Lines;
+        status_of_rradio.running_status = RunningStatus::BadErrorMessage;
     } else {
         let line2 = generate_line2(status_of_rradio);
         status_of_rradio
@@ -677,8 +648,7 @@ fn unmount_if_needed(
 ) -> Result<(), String> {
     if let Some(usb) = &config.usb {
         if status_of_rradio.usb_is_mounted {
-            if let Err(error_message) =
-                sys_mount::unmount(&usb.mount_folder, sys_mount::UnmountFlags::DETACH)
+            if let Err(error_message) = sys_mount::unmount(&usb.mount_folder, UnmountFlags::DETACH)
             {
                 eprintln!(
                     "Failed to unmount the device mounted on {}. Got error {:?}\r",

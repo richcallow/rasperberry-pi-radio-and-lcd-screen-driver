@@ -1,14 +1,6 @@
 use chrono::Duration;
 
-use crate::{
-    get_channel_details,
-    lcd::{
-        self,
-        get_local_ip_address::{self, NetworkData},
-        RunningStatus,
-    },
-    read_config,
-};
+use crate::{get_channel_details, lcd, read_config};
 
 #[derive(Debug, Clone, Copy)]
 /// stores the position of the tracks, ie the time since starting to play it
@@ -18,7 +10,7 @@ pub struct PositionAndDuration {
     pub duration_ms: Option<u64>,
 }
 /// The maximum possible as the channel number is 2 decimal digits
-const HIGHEST_POSSIBLE_CHANNEL_NUMBER: usize = 99;
+const HIGHEST_POSSIBLE_CHANNEL_NUMBER: usize = 100;
 #[derive(Debug)] // neither Copy nor clone are implmented as the player can only have a single status
 /// A struct listing all information needed to dispaly the status of rradio.
 pub struct PlayerStatus {
@@ -40,11 +32,9 @@ pub struct PlayerStatus {
     pub line_1_data: lcd::ScrollData,
     pub line_2_data: lcd::ScrollData,
     pub line_34_data: lcd::ScrollData,
-    /// Stores organisation, a vec of startion URLs & whether or not the last track is a ding
     pub channel_file_data: get_channel_details::ChannelFileDataDecoded,
     pub buffering_percent: i32,
-    /// stores SSID, local IP address & gateway address
-    pub network_data: get_local_ip_address::NetworkData,
+    pub ip_address_or_error_as_string: String,
     /// true if the USB is mounted locally
     pub usb_is_mounted: bool,
 }
@@ -55,8 +45,8 @@ impl PlayerStatus {
             toml_error: None,
             running_status: lcd::RunningStatus::Startingup,
             artist: String::new(),
-            channel_number: 101, // an invalid value that cannot match as must be in the range 0 to 99 inclusive
-            previous_channel_number: 102,
+            channel_number: 101, // an invalid value that cannot match
+            previous_channel_number: 101,
             position_and_duration: [PositionAndDuration {
                 position: Duration::seconds(0),
                 duration_ms: None,
@@ -67,7 +57,7 @@ impl PlayerStatus {
             line_34_data: lcd::ScrollData::new("", 2),
             channel_file_data: get_channel_details::ChannelFileDataDecoded {
                 organisation: String::new(),
-                station_urls: vec![],
+                station_url: vec![],
                 source_type: SourceType::Unknown,
                 last_track_is_a_ding: false,
             },
@@ -75,37 +65,8 @@ impl PlayerStatus {
             current_volume: config.initial_volume,
             gstreamer_state: gstreamer::State::Null,
             buffering_percent: 0,
+            ip_address_or_error_as_string: String::new(),
             usb_is_mounted: false,
-            network_data: NetworkData::new(),
-        }
-    }
-
-    /// Tries multiple times to get the WiFi data & store it in self.network_data.
-    /// Sets self.running_status to RunningStatus::LongMessageOnAll4Lines so that its attempts can be seen on the LCD screen
-    /// Sets self.running_status to RunningStatus::Startingup if successful
-    pub fn update_network_data(
-        &mut self,
-        lcd: &mut crate::lcd::Lc,
-        config: &crate::read_config::Config,
-    ) {
-        self.running_status = RunningStatus::LongMessageOnAll4Lines;
-        for count in 0..40 {
-            // go round the loop multiple times looking for the IP address
-            self.all_4lines.update_if_changed(
-                format!("Looking for IP address. Attempt number {count}").as_str(),
-            );
-            lcd.write_rradio_status_to_lcd(self, config);
-
-            match crate::get_local_ip_address::try_once_to_get_wifi_network_data() {
-                Ok(network_data) => {
-                    self.network_data = network_data;
-                    self.running_status = crate::RunningStatus::Startingup;
-                    return;
-                }
-                Err(error) => self
-                    .all_4lines
-                    .update_if_changed(format!("Got error {error}  on count {count}").as_str()),
-            }
         }
     }
 }
