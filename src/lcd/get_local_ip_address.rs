@@ -111,6 +111,14 @@ pub fn set_up_wifi_password(
     {
         Ok(_) => {
             status_of_rradio.usb_is_mounted = true;
+
+            if !std::path::Path::new(&passfile).exists() {
+                return Err(format!(
+                    "Wi-Fi does not seem to be working and cannot find the Wi-Fi password file {}",
+                    passfile
+                ));
+            }
+
             let config_as_result =
                 std::fs::read_to_string(passfile.clone()).map_err(|toml_file_read_error| {
                     format!(
@@ -219,6 +227,6 @@ pub fn set_up_wifi_password(
                 )),
             }
         }
-        Err(error_message) => Err(format!("Mount failure. Got error {:?}\r", error_message)),
+        Err(error_message) => Err(format!("Wi-fi does not seem to be working and could not mount the memory stick to read the password file. Got error {:?}\r", error_message)),
     }
 }
