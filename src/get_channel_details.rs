@@ -2,7 +2,7 @@
 //! It normally picks a random album & then plays all of that; however if a playlist is specified, it selects a random album and then plays it.
 
 /*use glib::FlagsBuilder;*/
-use std::{ffi::OsString, fs, os::fd::AsRawFd};
+use std::{ffi, fs, os::fd::AsRawFd};
 use substring::Substring;
 
 use crate::player_status::PlayerStatus;
@@ -12,7 +12,6 @@ mod mount_ext;
 /// The data about channel being played extracted from the TOML file.
 /// If there is an error trying to find a channel file, most of these entries will be empty
 #[derive(Debug, Default, serde::Deserialize)]
-// as Default is specified, this generates the default and if users do not specify play_list_device, it defaults to "None"
 #[serde(default)] // the specification of default means that all fields do not have to be specified
 pub struct ChannelFileDataFromTOML {
     /// The name of the organisation    eg       organisation = "Tradcan"
@@ -22,6 +21,7 @@ pub struct ChannelFileDataFromTOML {
     /// typically /dev/sda1
     pub playlist_device: Option<String>,
 }
+
 
 #[derive(Debug, PartialEq)]
 /// enum of the possible media types
@@ -101,7 +101,9 @@ pub enum ChannelErrorEvents {
     /// could not get the number of tracks on the CD
     CouldNotGetNumberOfCDTracks(i32),
 
-    CouldNotConvertToOsString(OsString),
+    CouldNotConvertToOsString(ffi::OsString),
+
+   
 }
 
 impl ChannelErrorEvents {
@@ -239,8 +241,7 @@ pub fn get_usb_details(
                                                                             length - 5,
                                                                             length - 1,
                                                                         ) {
-                                                                            ".mp3" | ".wav"
-                                                                            | ".ogg" => {
+                                                                            ".mp3" | ".wav" | ".ogg" | ".flac"  => {
                                                                                 let album_dir_entry_path_as_os_string = album_dir_entry
                                                                                         .path()
                                                                                     .into_os_string(
@@ -250,6 +251,7 @@ pub fn get_usb_details(
                                                                                     album_dir_entry_path,
                                                                                 ) = album_dir_entry_path_as_os_string.to_str()
                                                                                 {
+                                                                                                                                                           
                                                                                 list_of_audio_album_images.push(format!("{:?}", album_dir_entry_path));
                                                                                 break;
 
@@ -320,8 +322,9 @@ pub fn get_usb_details(
                 let chosen_album_with_quotes = list_of_audio_album_images
                     [rand::random_range(0..=(list_of_audio_album_images.len() - 1))]
                 .as_str(); // there are unwanted quotes around the string
-                let chosen_album =
-                    chosen_album_with_quotes.substring(1, chosen_album_with_quotes.len() - 1); // remove the quotes
+                let chosen_album = chosen_album_with_quotes
+                    .substring(1, chosen_album_with_quotes.chars().count() - 1); // remove the quotes
+
                 let mut list_of_wanted_tracks = vec![]; // list of the tracks that we will return
                 match fs::read_dir(chosen_album) {
                     Ok(audio_files) => {
@@ -364,7 +367,8 @@ pub fn get_usb_details(
                     &config.aural_notifications.filename_sound_at_end_of_playlist
                 {
                     // add a ding if one has been specified at the end of the list of tracks
-                    list_of_wanted_tracks.push(filename_sound_at_end_of_playlist.to_string());
+                    list_of_wanted_tracks
+                        .push(format!("file://{}", filename_sound_at_end_of_playlist));
                     last_track_is_a_ding = true;
                 } else {
                     last_track_is_a_ding = false;
@@ -603,6 +607,21 @@ fn set_up_playlist(
                                 // at this point, the name could be the name of a folder, so next check it is a file
                                 if let Ok(file_type) = file.file_type() {
                                     if file_type.is_file() {
+                                        let file_name_as_os_string = file.file_name();
+                                        let file_name =
+                                            std::path::Path::new(&file_name_as_os_string);
+                                        let Some("mp3" | "wav" | "ogg" | "flac") = file_name
+                                            .extension()
+                                            .map(std::ffi::OsStr::to_string_lossy)
+                                            .as_deref()
+                                        else {
+                                            continue;
+                                        };
+
+                                        list_of_audio_album_images.push(format!(
+                                            "file://{}",
+                                            file.path().to_string_lossy()
+                                        ));
                                         let filename_as_os_string = file.path().into_os_string();
 
                                         let filename;
@@ -651,11 +670,12 @@ fn set_up_playlist(
                         {
                             // add a ding if one has been specified at the end of the list of tracks
                             list_of_audio_album_images
-                                .push(filename_sound_at_end_of_playlist.to_string());
+                                .push(format!("file://{}", filename_sound_at_end_of_playlist));
                             last_track_is_a_ding = true;
                         } else {
                             last_track_is_a_ding = false;
                         }
+
 
                         Ok(ChannelFileDataDecoded {
                             organisation: format!("{}/{}", chosen_album, toml_data.organisation),
@@ -663,6 +683,7 @@ fn set_up_playlist(
                             source_type: SourceType::Usb,
                             last_track_is_a_ding,
                         })
+                        
                     }
                     Err(error_message) => {
                         if let Some(2) = error_message.raw_os_error() {

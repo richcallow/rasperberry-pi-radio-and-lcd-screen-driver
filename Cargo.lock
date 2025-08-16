@@ -797,6 +797,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "icmp"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac73e9bd805ebd8bfd8bb46886a3126ebdb1f46b5e8f5c73170c968912bb2e16"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "indexmap"
 version = "2.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1438,6 +1447,7 @@ dependencies = [
  "gstreamer-audio",
  "hex",
  "humantime-serde",
+ "icmp",
  "libc",
  "nix 0.30.1",
  "parse",
@@ -1452,6 +1462,7 @@ dependencies = [
  "sys-mount",
  "thousands",
  "tokio",
+ "tokio-icmp-echo",
  "tokio-stream",
  "toml",
  "unidecode",
@@ -1770,6 +1781,21 @@ dependencies = [
  "socket2",
  "tokio-macros",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "tokio-icmp-echo"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "764b3e2878bf0ac7eb9d1e87b366890c6d8f9c768b66e9665dcc6458c52ecf45"
+dependencies = [
+ "futures",
+ "mio",
+ "parking_lot",
+ "rand",
+ "socket2",
+ "thiserror 2.0.12",
+ "tokio",
 ]
 
 [[package]]

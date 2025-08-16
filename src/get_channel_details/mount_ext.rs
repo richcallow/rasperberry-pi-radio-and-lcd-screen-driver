@@ -17,6 +17,7 @@ pub fn mount(
         let mount_result_as_result = sys_mount::Mount::builder()
             .fstype("vfat")
             .flags(sys_mount::MountFlags::RDONLY | sys_mount::MountFlags::NOATIME)
+            .data("iocharset=utf8,utf8")
             .mount(device_to_be_mounted, mount_folder);
         match mount_result_as_result {
             Ok(_) => {

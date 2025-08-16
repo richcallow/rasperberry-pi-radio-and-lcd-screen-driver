@@ -37,3 +37,5 @@ eject = "0.1.1"
 nix = { version = "0.30.1", features = ["ioctl", "socket"] }
 socket = "0.0.7"
 rppal = "0.22.1"
+icmp = "0.3.0"
+tokio-icmp-echo = "0.4.3"

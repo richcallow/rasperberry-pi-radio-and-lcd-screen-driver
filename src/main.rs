@@ -11,7 +11,10 @@ use get_channel_details::{get_channel_details, ChannelErrorEvents, SourceType};
 use gstreamer::prelude::ElementExtManual;
 use gstreamer_interfaces::PlaybinElement;
 
+use libc::sleep;
+//use nix::sys::socket::MsgFlags;
 use player_status::{PlayerStatus, PositionAndDuration};
+use pnet::packet::icmp::echo_request::SequenceNumber;
 use std::{task::Poll, time::Instant};
 
 //use crate::lcd::NUM_CHARACTERS_PER_LINE; // if this line is not commented out, we can use NUM_CHARACTERS_PER_LINE without prefixing it with lcd::
@@ -59,34 +62,57 @@ enum Event {
     Ticker(tokio::time::Instant),
 }
 
-// http://192.168.0.2:8082
+#[repr(packed)] // packed means, that all data is stored in a consecutive part of memory
+/// the struct for an ICMP packet, which we will use for a ping packet
+pub struct IcmpEcho {
+    pub ptype: u8, // 8 for ping
+    pub code: u8,  // must be zero for a ping
+    pub checksum: u16,
+    pub identifier: u16,
+    pub sequence_number: u16,
+}
+
+fn get_checksum(data: &[u8]) -> u16 {
+    let mut sum: u32 = 0;
+    let mut count = 0;
+    while count < data.len() {
+        let word = (data[count] as u16) << 8 | (data[count + 1] & 0xff) as u16;
+        sum += word as u32;
+        count += 2;
+        if count == 2 {
+            // skip past the checksum; this field is assumed to to be zero by the algorithm
+            count = 4
+        }
+    }
+
+    while sum >> 16 > 0 {
+        sum = (sum & 0xffff) + (sum >> 16);
+    }
+
+    !sum as u16
+}
+
+/// converts an ICMP struct to bytes
+pub fn icmp_to_u8(icmp_echo: &mut IcmpEcho) -> &mut [u8] {
+    unsafe {
+        std::slice::from_raw_parts_mut(
+            (icmp_echo as *mut IcmpEcho) as *mut u8,
+            std::mem::size_of::<IcmpEcho>(),
+        )
+    }
+}
+/*pub fn any_as_mut_u8_slice<T: Sized>(p: &mut T) -> &mut [u8] {
+    unsafe {
+        std::slice::from_raw_parts_mut(
+            (p as *mut T) as *mut u8,
+            std::mem::size_of::<T>(),
+        )
+    }
+}*/
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), String> {
     //    we need async as for example, we will need to wait for input from gstreamer or the keyboard
-
-    /*    let socket_fd = nix::sys::socket::socket(
-        nix::sys::socket::AddressFamily::Inet,
-        nix::sys::socket::SockType::Raw,
-        nix::sys::socket::SockFlag::empty(),
-        nix::sys::socket::SockProtocol::Icmp,
-    )
-    .unwrap();
-    println!("socket_fd{:?}", socket_fd);
-    //nix::sys::socket::sendto(socket_fd.as_raw_fd(), buf, addr, flags).unwrap();
-
-    //nix::sys::socket::recvfrom(socket_fd.as_raw_fd(), buf).unwrap();
-
-    https://stackoverflow.com/questions/29307390/how-does-fd-isset-work
-    https://github.com/torvalds/linux/blob/master/include/net/icmp.h
-    https://docs.rs/nix/latest/nix/sys/socket/enum.SockProtocol.html
-    https://docs.rs/nix/latest/nix/sys/socket/fn.socket.html
-    https://docs.rs/tokio/latest/tokio/io/unix/struct.AsyncFd.html#method.new
-    */
-
-    //    use std::process;
-    //
-    //println!("My pid is {}", process::id());
 
     let mut lcd;
     match lcd::Lc::new() {
@@ -139,8 +165,6 @@ async fn main() -> Result<(), String> {
     // first assume that the WiFi is working and has a valid SSID & Password
     status_of_rradio.update_network_data(&mut lcd, &config);
 
-    //get_local_ip_address::get_wifi_data(&mut status_of_rradio, &mut lcd, &config);
-
     if !status_of_rradio.network_data.is_valid {
         match lcd::get_local_ip_address::set_up_wifi_password(
             &mut status_of_rradio,
@@ -172,6 +196,122 @@ async fn main() -> Result<(), String> {
         .as_str(),
         1,
     );
+
+    //use icmp;
+    use std::net::{IpAddr, Ipv4Addr};
+    let address_to_ping = "192.168.0.99"
+        .parse::<IpAddr>()
+        .expect("failed to parse the IP adddress");
+
+    /*extern crate futures;
+        extern crate tokio;
+        extern crate tokio_icmp_echo;
+        use futures::{Future, Stream};
+
+
+        let pinger = tokio_icmp_echo::Pinger::new();
+
+
+
+        let stream = pinger.and_then(move |pinger| Ok(pinger.chain(address_to_ping).stream()));
+
+        //    let stream = pinger.and_then(move |pinger| Ok(pinger.chain(address_to_ping).stream()));
+        let future = stream.and_then(|stream| {
+            stream.take(3).for_each(|mb_time| {
+                match mb_time {
+                    Some(time) => println!("time={}", time),
+                    None => println!("timeout"),
+                }
+                Ok(())
+            })
+        });
+
+        tokio::run(future.map_err(|err| eprintln!("Error: {}", err)));
+    */
+
+    use futures::{future, StreamExt};
+
+    let addr = "192.168.0.3"
+        .parse::<IpAddr>()
+        .expect("failed to parse the IP adddress");
+
+    /*let pinger = tokio_icmp_echo::Pinger::new().await.unwrap();
+        let stream = pinger.chain(addr).stream();
+        stream
+            .take(5)
+            .for_each(|mb_time| {
+                match mb_time {
+                    Ok(Some(time)) => println!("time={:?}", time),
+                    Ok(None) => println!("timeout"),
+                    Err(err) => println!("error: {:?}", err),
+                }
+                future::ready(())
+            })
+            .await;
+    */
+    let mut ping = icmp::IcmpSocket::connect(address_to_ping).unwrap();
+
+    let identifier = 13;
+    let sequence_number = 44;
+
+    let mut icmp_echo = IcmpEcho {
+        ptype: 8, // 8 is the value for a ping
+        code: 0,  // code must be zero for a ping
+        checksum: 0,
+        identifier,
+        sequence_number,
+    };
+
+    let icmp_packet = icmp_to_u8(&mut icmp_echo); // convert to a U8
+    [icmp_packet[2], icmp_packet[3]] = get_checksum(icmp_packet).to_be_bytes(); // calculate the checksum & insert it in the correct place
+
+    //ping.set_ttl(2048); it defaults to 64
+
+    const LENGTH_PING_RX_BUFFER: usize = 60;
+    let mut rx_buffer: [u8; LENGTH_PING_RX_BUFFER] = [0; LENGTH_PING_RX_BUFFER];
+    let time_sent = chrono::Local::now();
+    let result = ping.send(icmp_packet);
+
+    let g = ping.recv_from(&mut rx_buffer);
+    let time_rx = chrono::Local::now();
+
+    let time_taken = time_rx - time_sent;
+
+    println!(
+        "RES{:?}     {:?}    {:?}  \r\ntime taken {}\r",
+        result,
+        g,
+        rx_buffer,
+        time_taken.num_milliseconds()
+    );
+
+    /*
+    https://crates.io/crates/tokio-icmp-echo
+
+    let ping_fd = nix::sys::socket::socket(
+            nix::sys::socket::AddressFamily::Inet,
+            nix::sys::socket::SockType::Raw,
+            nix::sys::socket::SockFlag::empty(),
+            nix::sys::socket::SockProtocol::Icmp,
+        )
+        .unwrap();
+        println!("ping_fd{:?}", ping_fd);
+        use std::os::fd::AsRawFd;
+
+        let mut buf;
+        let addr;
+        let flags = MsgFlags::all();
+
+        //nix::sys::socket::sendto(ping_fd.as_raw_fd(), buf, addr, flags).unwrap();
+    */
+    /*  //nix::sys::socket::recvfrom(socket_fd.as_raw_fd(), buf).unwrap();
+
+    https://stackoverflow.com/questions/29307390/how-does-fd-isset-work
+    https://github.com/torvalds/linux/blob/master/include/net/icmp.h
+    https://docs.rs/nix/latest/nix/sys/socket/enum.SockProtocol.html
+    https://docs.rs/nix/latest/nix/sys/socket/fn.socket.html
+    https://docs.rs/tokio/latest/tokio/io/unix/struct.AsyncFd.html#method.new
+    */
 
     match gstreamer_interfaces::PlaybinElement::setup(&config) {
         Ok((mut playbin, bus_stream)) => {
@@ -299,7 +439,7 @@ async fn main() -> Result<(), String> {
                                 playbin.play_track(&status_of_rradio)
                             {
                                 status_of_rradio.all_4lines.update_if_changed(
-                                    format!("When playing a track got {playbin_error_message}")
+                                    format!("When wanting to play the previous track got {playbin_error_message}")
                                         .as_str(),
                                 );
                                 status_of_rradio.running_status =
@@ -368,7 +508,7 @@ async fn main() -> Result<(), String> {
                                 }
                                 Err(the_error) => {
                                     println!(
-                                        "got channel detail error {:?}\r",
+                                        "got channel detail error {}\r",
                                         &the_error.to_lcd_screen()
                                     );
 
@@ -640,7 +780,10 @@ fn next_track(status_of_rradio: &mut PlayerStatus, playbin: &PlaybinElement) {
         % status_of_rradio.channel_file_data.station_urls.len();
     if let Err(playbin_error_message) = playbin.play_track(status_of_rradio) {
         status_of_rradio.all_4lines.update_if_changed(
-            format!("When playing a track got {playbin_error_message}").as_str(),
+            format!(
+                "When wanting to play the next track playing a track got {playbin_error_message}"
+            )
+            .as_str(),
         );
         status_of_rradio.running_status = RunningStatus::LongMessageOnAll4Lines;
     } else {
