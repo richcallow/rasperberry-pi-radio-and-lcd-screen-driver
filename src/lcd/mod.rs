@@ -687,11 +687,19 @@ impl Lc {
         } else {
             {
                 text_buffer.write_text_to_single_line(
-                    format!("local{}", status_of_rradio.network_data.local_ip_address).bytes(),
+                    format!(
+                        "local{}",
+                        status_of_rradio.network_data.local_ip_address
+                    )
+                    .bytes(),
                     LineNum::Line1,
                 );
                 text_buffer.write_text_to_single_line(
-                    format!("G'way{}", status_of_rradio.network_data.gateway_ip_address).bytes(),
+                    format!(
+                        "G'way{}",
+                        status_of_rradio.network_data.gateway_ip_address
+                    )
+                    .bytes(),
                     LineNum::Line2,
                 );
             }

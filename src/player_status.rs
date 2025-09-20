@@ -7,7 +7,7 @@ use crate::{
         get_local_ip_address::{self, NetworkData},
         RunningStatus,
     },
-    read_config,
+    ping, read_config,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -47,6 +47,7 @@ pub struct PlayerStatus {
     pub network_data: get_local_ip_address::NetworkData,
     /// true if the USB is mounted locally
     pub usb_is_mounted: bool,
+    pub ping_data: ping::PingData,
 }
 impl PlayerStatus {
     pub fn new(config: &read_config::Config) -> PlayerStatus {
@@ -77,6 +78,7 @@ impl PlayerStatus {
             buffering_percent: 0,
             usb_is_mounted: false,
             network_data: NetworkData::new(),
+            ping_data: ping::PingData::new(),
         }
     }
 

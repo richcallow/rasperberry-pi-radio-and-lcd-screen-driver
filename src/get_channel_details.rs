@@ -2,7 +2,7 @@
 //! It normally picks a random album & then plays all of that; however if a playlist is specified, it selects a random album and then plays it.
 
 /*use glib::FlagsBuilder;*/
-use std::{ffi, fs, os::fd::AsRawFd};
+use std::{fs, os::fd::AsRawFd};
 use substring::Substring;
 
 use crate::player_status::PlayerStatus;
@@ -21,7 +21,6 @@ pub struct ChannelFileDataFromTOML {
     /// typically /dev/sda1
     pub playlist_device: Option<String>,
 }
-
 
 #[derive(Debug, PartialEq)]
 /// enum of the possible media types
@@ -60,9 +59,7 @@ pub enum ChannelErrorEvents {
     },
 
     /// Got an error reading the folder entry
-    ErrorReadingFolderEntry {
-        error_message: String,
-    },
+    ErrorReadingFolderEntry { error_message: String },
 
     /// For some reason we found the channel file, but could not read it.
     CouldNotReadChannelFile {
@@ -100,10 +97,6 @@ pub enum ChannelErrorEvents {
 
     /// could not get the number of tracks on the CD
     CouldNotGetNumberOfCDTracks(i32),
-
-    CouldNotConvertToOsString(ffi::OsString),
-
-   
 }
 
 impl ChannelErrorEvents {
@@ -187,9 +180,6 @@ impl ChannelErrorEvents {
             ChannelErrorEvents::CouldNotGetNumberOfCDTracks(error) => {
                 format!("When getting number of CD tracks, got error {}", error)
             }
-            ChannelErrorEvents::CouldNotConvertToOsString(os_string) => {
-                format!("Could not convert {:?} to a String", os_string)
-            }
         }
     }
 }
@@ -229,37 +219,33 @@ pub fn get_usb_details(
                                                                     if let Ok(file_entry) =
                                                                         file_as_result
                                                                     {
-                                                                        let filename = format!(
-                                                                            "{:?}",
-                                                                            file_entry.file_name()
-                                                                        )
-                                                                        .to_lowercase();
+                                                                        let file_name_as_os_string =
+                                                                            file_entry.path();
+                                                                        let file_name = std::path::Path::new(&file_name_as_os_string);
+                                                                        let file_extension =  file_name.extension().map(|extension | extension.to_string_lossy().to_ascii_lowercase());
 
-                                                                        let length = filename.len();
-                                                                        match filename.substring(
-                                                                            // see if the extension is one we can handle
-                                                                            length - 5,
-                                                                            length - 1,
-                                                                        ) {
-                                                                            ".mp3" | ".wav" | ".ogg" | ".flac"  => {
-                                                                                let album_dir_entry_path_as_os_string = album_dir_entry
-                                                                                        .path()
-                                                                                    .into_os_string(
-                                                                                    );
+                                                                        if let Some(
+                                                                            "mp3" | "wav" | "ogg"
+                                                                            | "flac",
+                                                                        ) = file_extension
+                                                                            .as_deref()
+                                                                        {
+                                                                            /*println!(
+                                                                                "DDDDDDD{:?}\r",
+                                                                                album_dir_entry
+                                                                                    .path()
+                                                                            );
 
-                                                                                if let Some(
-                                                                                    album_dir_entry_path,
-                                                                                ) = album_dir_entry_path_as_os_string.to_str()
-                                                                                {
-                                                                                                                                                           
-                                                                                list_of_audio_album_images.push(format!("{:?}", album_dir_entry_path));
-                                                                                break;
-
-                                                                               } else {
-                                                                                    return Err(ChannelErrorEvents::CouldNotConvertToOsString(album_dir_entry_path_as_os_string));
-                                                                                };
-                                                                            }
-                                                                            _ => {} // if it is not a music file skip it
+                                                                            let h = album_dir_entry
+                                                                                .path()
+                                                                                .to_string_lossy()
+                                                                                .to_string();
+                                                                            println!(
+                                                                                "hhh{}hhh\r",
+                                                                                h
+                                                                            );*/
+                                                                            list_of_audio_album_images.push(format!("{:?}",album_dir_entry.path() ));
+                                                                            break;
                                                                         }
                                                                     } else {
                                                                         return Err(ChannelErrorEvents::USBReadReadError("Failed while searching for audio files in folder".to_string()));
@@ -401,7 +387,6 @@ struct CdToc {
 /// namely organisation (=CD), station_url & sets the source type to be SourceType::CD
 pub fn get_cd_details(
     config: &crate::read_config::Config, // the data read from rradio's config.toml
-    status_of_rradio: &mut PlayerStatus,
 ) -> Result<ChannelFileDataDecoded, ChannelErrorEvents> {
     let device =
         std::fs::File::open("/dev/cdrom") //dev/cdrom is hard coded as it cannot be anything else
@@ -451,9 +436,6 @@ pub fn get_cd_details(
         0 => {} // 0 is the Ok result
         _ => return Err(ChannelErrorEvents::CouldNotGetNumberOfCDTracks(result)),
     };
-
-    status_of_rradio.channel_file_data.source_type = SourceType::CD;
-    status_of_rradio.channel_file_data.organisation = "CD".to_string();
 
     let mut station_url = Vec::new();
 
@@ -508,7 +490,7 @@ pub fn get_channel_details(
         .as_ref()
         .is_some_and(|cd_data| &channel_number == cd_data)
     {
-        get_cd_details(config, &mut *status_of_rradio)
+        get_cd_details(config)
     } else {
         let directory_entries_in_playlist_folder =
             std::fs::read_dir(&channels_folder).map_err(|read_error| {
@@ -533,7 +515,7 @@ pub fn get_channel_details(
                 .starts_with(format!("{:0>2}", channel_number).as_str())
             {
                 // if we get here, it matched & thus we have got the channel file the user wanted
-                let channel_file_data =
+                let channel_file_info =
                     std::fs::read_to_string(directory_entry_in_playlist_folder.path()).map_err(
                         |error_string| ChannelErrorEvents::CouldNotReadChannelFile {
                             error_message: error_string.to_string(),
@@ -545,7 +527,7 @@ pub fn get_channel_details(
                     )?;
 
                 let toml_result: Result<ChannelFileDataFromTOML, toml::de::Error> =
-                    toml::from_str(channel_file_data.trim_ascii_end());
+                    toml::from_str(channel_file_info.trim_ascii_end());
                 let toml_data = toml_result.map_err(|toml_error| {
                     ChannelErrorEvents::CouldNotParseChannelFile {
                         channel_number,
@@ -612,7 +594,9 @@ fn set_up_playlist(
                                             std::path::Path::new(&file_name_as_os_string);
                                         let Some("mp3" | "wav" | "ogg" | "flac") = file_name
                                             .extension()
-                                            .map(std::ffi::OsStr::to_string_lossy)
+                                            .map(|extension| {
+                                                extension.to_string_lossy().to_lowercase()
+                                            })
                                             .as_deref()
                                         else {
                                             continue;
@@ -622,37 +606,6 @@ fn set_up_playlist(
                                             "file://{}",
                                             file.path().to_string_lossy()
                                         ));
-                                        let filename_as_os_string = file.path().into_os_string();
-
-                                        let filename;
-                                        if let Some(filename_check) = filename_as_os_string.to_str()
-                                        {
-                                            filename = filename_check
-                                        } else {
-                                            return Err(
-                                                ChannelErrorEvents::CouldNotConvertToOsString(
-                                                    filename_as_os_string,
-                                                ),
-                                            );
-                                        }
-
-                                        let length = filename.len();
-
-                                        match filename
-                                            .substring(
-                                                // see if the extension is one we can handle
-                                                length - 4,
-                                                length,
-                                            )
-                                            .to_lowercase() // convert to lowercase so the match becomes case-insensitive
-                                            .as_str()
-                                        {
-                                            ".mp3" | ".wav" | ".ogg" => {
-                                                list_of_audio_album_images
-                                                    .push(format!("file://{filename}"));
-                                            }
-                                            _ => {} // if it is not a music file skip it
-                                        }
                                     }
                                 }
                             } else {
@@ -676,14 +629,12 @@ fn set_up_playlist(
                             last_track_is_a_ding = false;
                         }
 
-
                         Ok(ChannelFileDataDecoded {
                             organisation: format!("{}/{}", chosen_album, toml_data.organisation),
                             station_urls: list_of_audio_album_images,
                             source_type: SourceType::Usb,
                             last_track_is_a_ding,
                         })
-                        
                     }
                     Err(error_message) => {
                         if let Some(2) = error_message.raw_os_error() {
