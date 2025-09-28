@@ -123,18 +123,25 @@ impl PlaybinElement {
                .set_state(gstreamer::State::Null)      // we need to set it to null before we can change the station 
         {
         Ok(_state_change_success) => {
-                if status_of_rradio.index_to_current_track >= status_of_rradio.channel_file_data.station_urls.len(){
+            if (status_of_rradio.channel_number == player_status::START_UP_DING_CHANNEL_NUMER) && 
+            (status_of_rradio.position_and_duration[player_status::NUMBER_OF_POSSIBLE_CHANNELS].channel_data.station_urls.is_empty()) {return Ok(())}
+
+            if status_of_rradio.position_and_duration[status_of_rradio.channel_number].index_to_current_track >= 
+                    status_of_rradio.position_and_duration[status_of_rradio.channel_number].channel_data.station_urls.len(){
                     // as index_to_current_track is a usize, there is no need to check it it is not negative
                             println!(
             "playlist {:?}\r",
-            status_of_rradio.channel_file_data.station_urls
-        );
+            status_of_rradio.position_and_duration[status_of_rradio.channel_number].channel_data.station_urls);
+                   eprintln!("Index to tracks out of bounds; it is {} and the list has {} elements\r", 
+                   status_of_rradio.position_and_duration[status_of_rradio.channel_number].index_to_current_track, status_of_rradio.position_and_duration[status_of_rradio.channel_number].channel_data.station_urls.len());
                    return  Err(format!("Index to tracks out of bounds; it is {} and the list has {} elements", 
-                   status_of_rradio.index_to_current_track, status_of_rradio.channel_file_data.station_urls.len()));
+                   status_of_rradio.position_and_duration[status_of_rradio.channel_number].index_to_current_track, status_of_rradio.position_and_duration[status_of_rradio.channel_number].channel_data.station_urls.len()));
                 }
+
+                let index_to_current_track = status_of_rradio.position_and_duration[status_of_rradio.channel_number].index_to_current_track;
                 self.playbin_element.set_property(
                     "uri",              // if "uri" does not exist, it panics, but that does not seem to be anything that can be done about it.
-                    &status_of_rradio.channel_file_data.station_urls[status_of_rradio.index_to_current_track],
+                    &status_of_rradio.position_and_duration[status_of_rradio.channel_number].channel_data.station_urls[index_to_current_track],
                 );
 
                 match self.playbin_element //clone here makes it stop working

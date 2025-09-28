@@ -42,7 +42,7 @@ pub struct Config {
     /// Notification sounds
     pub aural_notifications: AuralNotifications,
 
-    pub cd_channel_number: Option<u8>, // in the range 0 to 99 inclusive
+    pub cd_channel_number: Option<usize>, // in the range 0 to 99 inclusive
 
     pub usb: Option<Usb>,
 }
@@ -50,7 +50,7 @@ pub struct Config {
 #[derive(Debug, serde::Deserialize)]
 pub struct Usb {
     /// 2 digit channel number
-    pub channel_number: u8, // in the range 0 to 99 inclusive
+    pub channel_number: usize, // in the range 0 to 99 inclusive
     /// eg device = "/dev/sda1"
     pub device: String,
     /// Folder where the USB drive is mounted

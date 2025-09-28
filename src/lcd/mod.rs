@@ -12,6 +12,7 @@ use std::{
 
 use crate::{
     get_channel_details::{self, SourceType},
+    ping::PingStatus,
     player_status,
 };
 use anyhow::Context;
@@ -44,6 +45,7 @@ pub enum RunningStatus {
     NoChannel,
     /// User entered at least twice consecutively a channel that could not be found
     NoChannelRepeated,
+    /// the state when there is no error message, & neither starting up nor shutting down
     RunningNormally,
     LongMessageOnAll4Lines,
     ShuttingDown,
@@ -139,6 +141,47 @@ impl ScrollData {
             last_update_time: Instant::now(),
         }
     }
+
+    /// Given a scrollable line, if it is time to scroll, updates the scroll position & last_update_time.
+    /// or does nothing i fit is not yet time to scroll
+    pub fn update_scroll(
+        &mut self,
+        config: &crate::read_config::Config, // the data read from rradio's config.toml
+        number_of_available_characters: usize,
+    ) {
+        if (self.text.bytes.len() <= number_of_available_characters)
+            || (self.last_update_time.elapsed()
+                < tokio::time::Duration::from_millis(config.scroll.scroll_period_ms))
+        {
+            return; // we do not need to scroll
+        }
+        // We need to scroll
+        let increment = self
+            .text
+            .bytes
+            .iter() // Iterate over the octets in the text
+            .enumerate() // We want to know how far we've advanced
+            .take(config.scroll.max_scroll) // we want to advance at most that many chartacters default 14
+            .skip(config.scroll.min_scroll) // we want to advance at least that many characters default 6
+            .find_map(|(increment, character)| (*character == b' ').then_some(increment))
+            // Find the position offset where that character is a space
+            .unwrap_or(config.scroll.min_scroll); // If we can't find a space, move 6 characters
+
+        self.scroll_position += increment;
+        match self.text.bytes.get(self.scroll_position..) {
+            None => {
+                self.scroll_position = 0; // We've scrolled past the end of the text
+            }
+            Some(displayed_text) => {
+                // If we've scrolled almost to the end
+                if displayed_text.len() < 10 {
+                    self.scroll_position = 0;
+                }
+            }
+        }
+        self.last_update_time = Instant::now();
+    }
+
     /// Updates self with the new text (and initialises the scrolling state) if the encoded version `new_text` does not match the current text.
     pub fn update_if_changed(&mut self, new_text: &str) {
         let new_scroll_data = Self::new(new_text, self.num_lines); // remember that new initialises the scrolling state.
@@ -435,6 +478,20 @@ impl Lc {
             text_buffer
                 .write_text_to_single_line(status_of_rradio.line_1_data.bytes(), LineNum::Line1);
         }
+        let ping_message;
+        match status_of_rradio.ping_data.destination_of_last_ping {
+            crate::ping::PingWhat::Local => {
+                ping_message = format!("Local ping {}ms", &status_of_rradio.ping_data.ping_time);
+            }
+            crate::ping::PingWhat::Remote => {
+                ping_message = format!("Remote ping {}ms", status_of_rradio.ping_data.ping_time);
+            }
+            crate::ping::PingWhat::Nothing => {
+                ping_message = "ping error: no ping destination".to_string();
+            }
+        }
+        text_buffer.write_text_to_single_line(ping_message.bytes(), LineNum::Line2);
+
         text_buffer.write_text_to_single_line(
             Lc::get_current_date_and_time_text().bytes(),
             LineNum::Line3,
@@ -444,51 +501,6 @@ impl Lc {
             Lc::get_temperature_and_wifi_strength_text().bytes(),
             LineNum::Line4,
         );
-    }
-    /// Given a scrollable line get the scroll offset & returns it as an Option(ScrollPosition )
-    /// (or None if the line does not need to scrolled becuase it is short enough or has been scrolled recently)
-    /// Ideally it would return it in ScrollData, but making ScrollData mutable stops compilaton working
-    pub fn get_scroll_position(
-        &self,
-        line: ScrollData,
-        config: &crate::read_config::Config, // the data read from rradio's config.toml
-        number_of_available_characters: usize,
-    ) -> Option<usize> {
-        if (line.text.bytes.len() <= number_of_available_characters)
-            || (line.last_update_time.elapsed()
-                < tokio::time::Duration::from_millis(config.scroll.scroll_period_ms))
-        {
-            return None; // we do not need to scroll
-        }
-        // We need to scroll
-
-        let increment = line
-            .text
-            .bytes
-            .iter() // Iterate over the octets in the text
-            .enumerate() // We want to know how far we've advanced
-            .take(config.scroll.max_scroll) // we want to advance at most that many chartacters default 14
-            .skip(config.scroll.min_scroll) // we want to advance at least that many characters default 6
-            .find_map(|(increment, character)| (*character == b' ').then_some(increment))
-            // Find the position offset where that character is a space
-            .unwrap_or(config.scroll.min_scroll); // If we can't find a space, move 6 characters
-
-        let mut scroll_position = line.scroll_position + increment;
-
-        match line.text.bytes.get((scroll_position)..) {
-            None => {
-                // We've scrolled past the end of the text
-
-                scroll_position = 0;
-            }
-            Some(displayed_text) => {
-                // If we've scrolled almost to the end
-                if displayed_text.len() < 10 {
-                    scroll_position = 0;
-                }
-            }
-        }
-        Some(scroll_position)
     }
 
     /// Fills the text buffer when we are playing normally (or are paused)
@@ -506,24 +518,35 @@ impl Lc {
             .num_milliseconds()
             < config.time_initial_message_displayed_after_channel_change_as_ms
         {
-            match status_of_rradio.channel_file_data.source_type {
-                SourceType::CD => "Playing CD".to_string(),
+            match status_of_rradio.position_and_duration[status_of_rradio.channel_number]
+                .channel_data
+                .source_type
+            {
+                SourceType::Cd => "Playing CD".to_string(),
                 SourceType::Usb => format!("USB {}", status_of_rradio.channel_number),
                 _ => format!("Station {}", status_of_rradio.channel_number),
             }
         } else {
-            match status_of_rradio.channel_file_data.source_type {
-                SourceType::CD | SourceType::Usb => {
-                    let position_secs = status_of_rradio.position_and_duration
-                        [status_of_rradio.index_to_current_track]
+            match status_of_rradio.position_and_duration[status_of_rradio.channel_number]
+                .channel_data
+                .source_type
+            {
+                SourceType::Cd | SourceType::Usb => {
+                    let position_secs = status_of_rradio.position_and_duration[status_of_rradio
+                        .position_and_duration[status_of_rradio.channel_number]
+                        .index_to_current_track]
                         .position
                         .num_seconds();
                     if let Some(duration_ms) = status_of_rradio.position_and_duration
-                        [status_of_rradio.index_to_current_track]
+                        [status_of_rradio.position_and_duration[status_of_rradio.channel_number]
+                            .index_to_current_track]
                         .duration_ms
                     {
                         let duration_secs = duration_ms / 1000;
-                        let track_index = status_of_rradio.index_to_current_track + 1; // humans count from 1
+                        let track_index = status_of_rradio.position_and_duration
+                            [status_of_rradio.channel_number]
+                            .index_to_current_track
+                            + 1; // humans count from 1
                         let track_index_digit_count = if track_index < 10 { 1 } else { 2 };
                         let position_secs_digit_count = match position_secs {
                             0..=9 => 1,
@@ -574,7 +597,9 @@ impl Lc {
         text_buffer.write_text_to_lines(status_of_rradio.line_2_data.bytes(), LineNum::Line2, 1);
         text_buffer.write_text_to_lines(status_of_rradio.line_34_data.bytes(), LineNum::Line3, 2);
 
-        if status_of_rradio.channel_file_data.source_type
+        if status_of_rradio.position_and_duration[status_of_rradio.channel_number]
+            .channel_data
+            .source_type
             == get_channel_details::SourceType::UrlList
         {
             // output the buffer state as we are playing a stream
@@ -687,19 +712,11 @@ impl Lc {
         } else {
             {
                 text_buffer.write_text_to_single_line(
-                    format!(
-                        "local{}",
-                        status_of_rradio.network_data.local_ip_address
-                    )
-                    .bytes(),
+                    format!("local{}", status_of_rradio.network_data.local_ip_address).bytes(),
                     LineNum::Line1,
                 );
                 text_buffer.write_text_to_single_line(
-                    format!(
-                        "G'way{}",
-                        status_of_rradio.network_data.gateway_ip_address
-                    )
-                    .bytes(),
+                    format!("G'way{}", status_of_rradio.network_data.gateway_ip_address).bytes(),
                     LineNum::Line2,
                 );
             }

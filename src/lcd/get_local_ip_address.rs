@@ -82,9 +82,8 @@ pub fn try_once_to_get_wifi_network_data() -> Result<NetworkData, String> {
                             ssid,
                             local_ip_address,
                             gateway_ip_address,
-
                             is_valid: true,
-                            remote_address: "www.google.com".to_string(),
+                            remote_address: "192.168.0.3".to_string(), // "www.google.com".to_string(),
                         })
                     } else {
                         Err(format!("Failed to convert gateway IP address {gateway_ip_address_as_string} to an IP address\r"))

@@ -22,7 +22,9 @@ pub fn mount(
         match mount_result_as_result {
             Ok(_) => {
                 status_of_rradio.usb_is_mounted = true;
-                status_of_rradio.channel_file_data.source_type = SourceType::Usb;
+                status_of_rradio.position_and_duration[status_of_rradio.channel_number]
+                    .channel_data
+                    .source_type = SourceType::Usb;
                 Ok(())
             }
             Err(mount_error) => {
@@ -41,7 +43,9 @@ pub fn mount(
                     Some(OS_RESOURCE_BUSY) => {
                         // as it is already mounted, we do not need to do mount it again
                         status_of_rradio.usb_is_mounted = true;
-                        status_of_rradio.channel_file_data.source_type = SourceType::Usb;
+                        status_of_rradio.position_and_duration[status_of_rradio.channel_number]
+                            .channel_data
+                            .source_type = SourceType::Usb;
                         Ok(())
                     }
                     Some(error_number) => Err(ChannelErrorEvents::UsbMountMountError(format!(

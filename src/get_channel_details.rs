@@ -5,7 +5,11 @@
 use std::{fs, os::fd::AsRawFd};
 use substring::Substring;
 
-use crate::player_status::PlayerStatus;
+use crate::{
+    gstreamer_interfaces::PlaybinElement,
+    lcd,
+    player_status::{self, PlayerStatus},
+};
 pub mod cd_functions;
 mod mount_ext;
 
@@ -22,18 +26,18 @@ pub struct ChannelFileDataFromTOML {
     pub playlist_device: Option<String>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 /// enum of the possible media types
 pub enum SourceType {
     Unknown,
     /// a list of URLs to play
     UrlList,
-    CD,
+    Cd,
     /// we will play random tracks on this USB device
     Usb,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 /// decoded data sucessfully read from the station channel file, ie organisaton, station_urls as a Vec, the Source type, & if the last track is a ding
 pub struct ChannelFileDataDecoded {
     /// The name of the organisation    eg       organisation = "Tradcan"
@@ -44,6 +48,16 @@ pub struct ChannelFileDataDecoded {
     pub source_type: SourceType,
     /// True if the last entry in URL list is a ding.
     pub last_track_is_a_ding: bool,
+}
+impl ChannelFileDataDecoded {
+    pub fn new() -> Self {
+        Self {
+            organisation: String::new(),
+            station_urls: vec![],
+            source_type: SourceType::Unknown,
+            last_track_is_a_ding: false,
+        }
+    }
 }
 
 /// an enum of errors returned by get_channel_details
@@ -69,7 +83,7 @@ pub enum ChannelErrorEvents {
 
     /// We read the channel file, but could not parse it
     CouldNotParseChannelFile {
-        channel_number: u8,
+        channel_number: usize,
         error_message: String,
     },
 
@@ -103,7 +117,7 @@ impl ChannelErrorEvents {
     /// Given an error enum, returns a string to go on the LCD screen
     pub fn to_lcd_screen(&self) -> String {
         match &self {
-            ChannelErrorEvents::CouldNotFindChannelFile => "unused".to_string(),
+            ChannelErrorEvents::CouldNotFindChannelFile => "CouldNotFindChannelFile".to_string(),
             ChannelErrorEvents::CouldNotParseChannelFile {
                 channel_number,
                 error_message,
@@ -230,21 +244,10 @@ pub fn get_usb_details(
                                                                         ) = file_extension
                                                                             .as_deref()
                                                                         {
-                                                                            /*println!(
-                                                                                "DDDDDDD{:?}\r",
-                                                                                album_dir_entry
-                                                                                    .path()
-                                                                            );
-
-                                                                            let h = album_dir_entry
+                                                                            list_of_audio_album_images.push(album_dir_entry
                                                                                 .path()
                                                                                 .to_string_lossy()
-                                                                                .to_string();
-                                                                            println!(
-                                                                                "hhh{}hhh\r",
-                                                                                h
-                                                                            );*/
-                                                                            list_of_audio_album_images.push(format!("{:?}",album_dir_entry.path() ));
+                                                                                .to_string() );
                                                                             break;
                                                                         }
                                                                     } else {
@@ -305,11 +308,9 @@ pub fn get_usb_details(
                     }
                 }
 
-                let chosen_album_with_quotes = list_of_audio_album_images
+                let chosen_album = list_of_audio_album_images
                     [rand::random_range(0..=(list_of_audio_album_images.len() - 1))]
-                .as_str(); // there are unwanted quotes around the string
-                let chosen_album = chosen_album_with_quotes
-                    .substring(1, chosen_album_with_quotes.chars().count() - 1); // remove the quotes
+                .as_str();
 
                 let mut list_of_wanted_tracks = vec![]; // list of the tracks that we will return
                 match fs::read_dir(chosen_album) {
@@ -338,7 +339,9 @@ pub fn get_usb_details(
                     Err(error_message) => {
                         if let Some(2) = error_message.raw_os_error() {
                             return Err(ChannelErrorEvents::CouldNotFindAlbum(format!(
-                                "whilst getting audio file names, could not find album {chosen_album_with_quotes}")));
+                                "whilst getting audio file names, could not find album {}",
+                                chosen_album
+                            )));
                         }
 
                         return Err(ChannelErrorEvents::USBReadReadError(format!(
@@ -362,7 +365,10 @@ pub fn get_usb_details(
 
                 Ok(ChannelFileDataDecoded {
                     organisation: chosen_album // if we remove the first part, we get the singer's name and the album name concatonated together
-                        .substring(length_of_mount_folder_path + 1, chosen_album.len() )
+                        .substring(
+                            length_of_mount_folder_path + 1,
+                            chosen_album.len(),
+                        )
                         .to_string(),
                     station_urls: list_of_wanted_tracks,
                     source_type: SourceType::Usb,
@@ -396,15 +402,6 @@ pub fn get_cd_details(
     const CDROM_DISC_STATUS: u64 = 0x5327; /* Get disc type, etc. */
     const CDROMREADTOCHDR: u64 = 0x5305; /* Read TOC header
                                          (struct cdrom_tochdr) */
-
-    /*nix::ioctl_none_bad!(read_cd_status, CDROM_DRIVE_STATUS);     // nix way of reading a CD drive
-    match unsafe { read_cd_status(device.as_raw_fd()) } {
-        Ok(4) => {}
-        Ok(n) => {}
-        Err(error) => {
-            println!("err{:?}", error)
-        }
-    };*/
 
     // first see if the CD drive is working OK & has a disk it it
     match unsafe { libc::ioctl(device.as_raw_fd(), CDROM_DRIVE_STATUS) } {
@@ -462,24 +459,77 @@ pub fn get_cd_details(
     Ok(ChannelFileDataDecoded {
         organisation: "CD".to_string(),
         station_urls: station_url,
-        source_type: SourceType::CD,
+        source_type: SourceType::Cd,
         last_track_is_a_ding,
     })
 }
 
-/// Given the folder that contains the channel files & the channel number as a string.
+pub fn get_channel_details_and_implement_them(
+    config: &crate::read_config::Config,
+    status_of_rradio: &mut PlayerStatus,
+    playbin: &PlaybinElement,
+) -> Result<(), String> {
+    match get_channel_details(config, status_of_rradio) {
+        Ok(new_channel_file_data) => {
+            status_of_rradio.toml_error = None;
+            // set  organisation,  station_urls, source_type,  last_track_is_a_ding
+            status_of_rradio.position_and_duration[status_of_rradio.channel_number].channel_data =
+                new_channel_file_data;
+            Ok(())
+        }
+        Err(get_channel_details_error) => {
+            status_of_rradio.channel_number = player_status::START_UP_DING_CHANNEL_NUMER;
+
+            if let ChannelErrorEvents::CouldNotFindChannelFile = get_channel_details_error {
+                /*if (status_of_rradio.running_status
+                    == lcd::RunningStatus::NoChannel)
+                    && (status_of_rradio.channel_number
+                        == status_of_rradio.previous_channel_number)
+                {
+                    status_of_rradio.toml_error = None; // clear the TOML error out, the user must have seen it by now
+                    status_of_rradio.running_status =
+                        lcd::RunningStatus::NoChannelRepeated;
+                } else {
+                    status_of_rradio.running_status =
+                        lcd::RunningStatus::NoChannel;
+                }*/
+
+                if let Some(ding_filename) = &config.aural_notifications.filename_error {
+                    // play a ding if one has been specified
+                    status_of_rradio.position_and_duration[status_of_rradio.channel_number]
+                        .channel_data
+                        .station_urls = vec![format!("file://{ding_filename}")];
+                    status_of_rradio.position_and_duration[status_of_rradio.channel_number]
+                        .index_to_current_track = 0;
+                    let _ignore_error_if_beep_fails = playbin.play_track(&status_of_rradio);
+                    status_of_rradio.position_and_duration[status_of_rradio.channel_number]
+                        .index_to_current_track = 0;
+                }
+            } else {
+                status_of_rradio
+                    .all_4lines
+                    .update_if_changed(get_channel_details_error.to_lcd_screen().as_str());
+                status_of_rradio.running_status = lcd::RunningStatus::LongMessageOnAll4Lines;
+            };
+            Err(format!(
+                "got channel detail error {}\r",
+                &get_channel_details_error.to_lcd_screen()
+            ))
+        }
+    }
+}
+
+/// Given the TOML data.
 /// If successful returns the details of the channel as the struct ChannelFileData.
 /// namely organisation, station_url (which is type SourceType::UrlList) & source_type.
-pub fn get_channel_details(
-    channels_folder: String, // The folder containing all the channels, eg /boot/playlists3
-    channel_number: u8,      //     in the range 0 to 99 inclusive
+fn get_channel_details(
     config: &crate::read_config::Config, // the data read from rradio's config.toml
     status_of_rradio: &mut PlayerStatus,
 ) -> Result<ChannelFileDataDecoded, ChannelErrorEvents> {
     if config
         .usb
         .as_ref()
-        .is_some_and(|usb_data| channel_number == usb_data.channel_number)
+        .is_some_and(|usb_data| status_of_rradio.channel_number == usb_data.channel_number)
     {
         get_usb_details(
             config,
@@ -488,17 +538,17 @@ pub fn get_channel_details(
     } else if config
         .cd_channel_number
         .as_ref()
-        .is_some_and(|cd_data| &channel_number == cd_data)
+        .is_some_and(|cd_data| &status_of_rradio.channel_number == cd_data)
     {
         get_cd_details(config)
     } else {
-        let directory_entries_in_playlist_folder =
-            std::fs::read_dir(&channels_folder).map_err(|read_error| {
-                ChannelErrorEvents::CouldNotReadChannelsFolder {
-                    channels_folder: channels_folder.clone(),
+        let directory_entries_in_playlist_folder = std::fs::read_dir(&config.stations_directory)
+            .map_err(
+                |read_error| ChannelErrorEvents::CouldNotReadChannelsFolder {
+                    channels_folder: config.stations_directory.clone(),
                     error_message: read_error.to_string(),
-                }
-            })?;
+                },
+            )?;
 
         for directory_entry_in_playlist_folder_as_result in directory_entries_in_playlist_folder {
             // As OK, enumerate all the files in the folder
@@ -512,7 +562,7 @@ pub fn get_channel_details(
             if directory_entry_in_playlist_folder
                 .file_name()
                 .to_string_lossy()
-                .starts_with(format!("{:0>2}", channel_number).as_str())
+                .starts_with(format!("{:0>2}", status_of_rradio.channel_number).as_str())
             {
                 // if we get here, it matched & thus we have got the channel file the user wanted
                 let channel_file_info =
@@ -530,12 +580,11 @@ pub fn get_channel_details(
                     toml::from_str(channel_file_info.trim_ascii_end());
                 let toml_data = toml_result.map_err(|toml_error| {
                     ChannelErrorEvents::CouldNotParseChannelFile {
-                        channel_number,
+                        channel_number: status_of_rradio.channel_number,
                         error_message: toml_error.to_string(),
                     }
                 })?;
 
-                //println!("\r\rpla dev {:?}\r\r", toml_data.playlist_device);
                 if toml_data.playlist_device.is_some() {
                     return set_up_playlist(toml_data, config, &mut *status_of_rradio);
                 // it is a playlist, not a simple USB system
@@ -614,8 +663,6 @@ fn set_up_playlist(
                                 ));
                             }
                         }
-                        /*println!("file list{:?}\r", list_of_audio_album_images);*/
-
                         let last_track_is_a_ding;
                         // if we get here everything has worked
                         if let Some(filename_sound_at_end_of_playlist) =

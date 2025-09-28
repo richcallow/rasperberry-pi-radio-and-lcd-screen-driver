@@ -12,7 +12,9 @@ pub enum Event {
     VolumeDown,
     PreviousTrack,
     NextTrack,
-    PlayStation { channel_number: u8 }, // channel_number will be  in the range "00" to "99", giving us the number of the station to play
+    OutputStatusDebug,                     // output the status of rradio
+    OutputConfigDebug,                     // output the config info
+    PlayStation { channel_number: usize }, // channel_number will be  in the range "00" to "99", giving us the number of the station to play
 }
 
 /// puts the keyboard into raw mode & prepares it to return a series of keyboard events
@@ -57,6 +59,9 @@ pub fn setup_keyboard(
                             crossterm::event::KeyCode::Char('/') => Event::VolumeDown,
                             crossterm::event::KeyCode::Char('-') => Event::PreviousTrack,
                             crossterm::event::KeyCode::Char('+') => Event::NextTrack,
+                            crossterm::event::KeyCode::Char('!') => Event::OutputStatusDebug,
+                            crossterm::event::KeyCode::Char('£') => Event::OutputConfigDebug,
+                            
                             crossterm::event::KeyCode::Char(current_digit @ '0'..='9') => {
                                 //the "@" symbol means make current_digit equal to the character that matched
                                 match stored_previous_digit_and_time {
@@ -67,7 +72,7 @@ pub fn setup_keyboard(
                                     {
                                         let new_channel =
                                             format!("{}{}", previous_digit, current_digit)
-                                                .parse::<u8>();
+                                                .parse::<usize>();
                                         Event::PlayStation {
                                             channel_number: new_channel.expect("When trying to turn 2 characters into a u8 it failed"),
                                         }
