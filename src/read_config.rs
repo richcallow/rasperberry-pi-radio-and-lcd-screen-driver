@@ -45,6 +45,8 @@ pub struct Config {
     pub cd_channel_number: Option<usize>, // in the range 0 to 99 inclusive
 
     pub usb: Option<Usb>,
+
+    pub max_number_of_pings_to_a_remote_destinaton: u32,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -105,6 +107,7 @@ impl Default for Config {
             aural_notifications: AuralNotifications::default(),
             cd_channel_number: None,
             usb: None,
+            max_number_of_pings_to_a_remote_destinaton: 15,
         }
     }
 }

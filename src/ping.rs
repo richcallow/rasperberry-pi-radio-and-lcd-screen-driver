@@ -36,7 +36,8 @@ pub struct PingData {
     pub last_ping_time_of_day: chrono::DateTime<Utc>, // the time the last ping was sent; used so we do not ping too often
     pub destination_to_ping: PingWhat,                // the address the next ping has to be sent to
     pub destination_of_last_ping: PingWhat,           // the address we sent the last ping to
-    pub ping_time: String,                            // the time the last ping took
+    pub ping_time: f32,                               // the time the last ping took
+    pub number_of_remote_pings_to_this_station: u32,
 }
 impl PingData {
     pub fn new() -> Self {
@@ -45,7 +46,15 @@ impl PingData {
             ping_status: PingStatus::PingNotSent,
             destination_to_ping: PingWhat::Local,
             destination_of_last_ping: PingWhat::Nothing,
-            ping_time: String::new(),
+            ping_time: 0.0,
+            number_of_remote_pings_to_this_station: 0,
+        }
+    }
+    pub fn toggle_ping_destination(&mut self) -> () {
+        self.destination_to_ping = match self.destination_to_ping {
+            PingWhat::Local =>   PingWhat::Remote,
+            PingWhat::Remote => PingWhat::Local,
+            PingWhat::Nothing => PingWhat::Nothing,
         }
     }
 }
@@ -59,6 +68,9 @@ pub fn send_ping(status_of_rradio: &mut player_status::PlayerStatus) -> std::pro
     let address = if status_of_rradio.ping_data.destination_to_ping == PingWhat::Local {
         status_of_rradio.network_data.gateway_ip_address.to_string()
     } else {
+        status_of_rradio
+            .ping_data
+            .number_of_remote_pings_to_this_station += 1;
         status_of_rradio.network_data.remote_address.clone()
     };
     Command::new("/bin/ping")
@@ -102,7 +114,7 @@ pub fn see_if_there_is_a_ping_response(
     }
 }
 
-/// return
+/// return if it worked as an Output & stores the ping time in status_of_rradio.ping_data.ping_time
 /// Can only usefully be called after checking that a ping reponse has been received (which can be done by using see_if_there_is_a_ping_response)
 pub fn get_ping_time(
     ping_output: Result<std::process::Output, std::io::Error>,
@@ -117,12 +129,25 @@ pub fn get_ping_time(
             let split_text = "mdev = ";
             if let Some(position_mdev) = output_as_ascii.find(split_text) {
                 let mut ping_time = output_as_ascii.split_off(position_mdev + split_text.len()); // at this point, the string contains too much trailing text.
-                if let Some(position_decimal_point) = ping_time.find('.') {
-                    let _ = ping_time.split_off(position_decimal_point + 2);
-                    status_of_rradio.ping_data.ping_time = ping_time;
+                if let Some(position_slash) = ping_time.find('/') {
+                    let _ = ping_time.split_off(position_slash);
+                    match ping_time.parse::<f32>() {
+                        Ok(time) => {
+                            status_of_rradio.ping_data.ping_time = time;
+                        }
+                        Err(error_message) => {
+                            status_of_rradio.ping_data.ping_time = 0.0;
+
+                            return Err(format!(
+                                "Could not convert the ping time \" {} to a float; got {}\r",
+                                ping_time, error_message
+                            ));
+                        }
+                    }
+
                     Ok(())
                 } else {
-                    Err("Could not find the decimal point when looking for a ping".to_string())
+                    Err("Could not find the terminating slash when looking for a ping".to_string())
                 }
             } else {
                 Err("could not parse the time returned from ping".to_string())

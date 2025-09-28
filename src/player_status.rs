@@ -105,6 +105,8 @@ impl PlayerStatus {
             "aural_notifications\t\t{:?}\r",
             config.pause_before_playing_increment
         );
+        println!("max_number_of_pings_to_a_remote_destinaton\t{}\r", config.max_number_of_pings_to_a_remote_destinaton);
+
         println!("scroll\t\t\t\t{:?}\r", config.scroll);
         println!(
             "smart_goto_previous_track_duration\t{:?}\r",

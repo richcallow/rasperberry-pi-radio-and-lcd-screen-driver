@@ -208,20 +208,19 @@ async fn main() -> Result<(), String> {
                             //we must show the output
                             let output =
                                 get_ping_time(child.wait_with_output(), &mut status_of_rradio);
-
-                            match status_of_rradio.ping_data.destination_to_ping {
-                                PingWhat::Local => {
-                                    status_of_rradio.ping_data.destination_to_ping =
-                                        PingWhat::Remote;
-                                }
-                                PingWhat::Remote => {
-                                    status_of_rradio.ping_data.destination_to_ping =
-                                        PingWhat::Local;
-                                }
-                                PingWhat::Nothing => {} // do nothing as we cannot toggle between Local & Remote
-                            };
+                            if status_of_rradio
+                                .ping_data
+                                .number_of_remote_pings_to_this_station
+                                <= config.max_number_of_pings_to_a_remote_destinaton
+                            {
+                                status_of_rradio.ping_data.toggle_ping_destination()
+                            }
+                            else {
+                                status_of_rradio.ping_data.destination_to_ping = PingWhat::Local;
+                            }
+                            ;
                             match output {
-                                Ok(ping_time) => {
+                                Ok(_ping_time) => {
                                     println!(
                                         "{:?}  {} ms\r",
                                         status_of_rradio.ping_data.destination_of_last_ping,
@@ -323,6 +322,9 @@ async fn main() -> Result<(), String> {
                         }
                         keyboard::Event::PreviousTrack => {
                             println!("PreviousTrack\r");
+                            status_of_rradio
+                                .ping_data
+                                .number_of_remote_pings_to_this_station = 0;
                             status_of_rradio.running_status = RunningStatus::RunningNormally; //at least hope this is true
                             status_of_rradio.position_and_duration
                                 [status_of_rradio.channel_number]
@@ -360,10 +362,17 @@ async fn main() -> Result<(), String> {
                             }
                         }
                         keyboard::Event::NextTrack => {
+                            status_of_rradio
+                                .ping_data
+                                .number_of_remote_pings_to_this_station = 0;
                             next_track(&mut status_of_rradio, &playbin);
                         }
                         keyboard::Event::PlayStation { channel_number } => {
                             status_of_rradio.running_status = RunningStatus::RunningNormally;
+                            status_of_rradio
+                                .ping_data
+                                .number_of_remote_pings_to_this_station = 0;
+
                             if channel_number == status_of_rradio.channel_number {
                                 //status_of_rradio.position_and_duration[status_of_rradio
                                 //    .position_and_duration[status_of_rradio.channel_number]
