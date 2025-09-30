@@ -197,52 +197,51 @@ async fn main() -> Result<(), String> {
             let mut child = ping::send_ping(&mut status_of_rradio);
 
             loop {
-                if status_of_rradio.ping_data.destination_to_ping != PingWhat::Nothing {
-                    match status_of_rradio.ping_data.ping_status {
-                        ping::PingStatus::TimedOut => {
-                            println!("timed out\r");
-                            child = ping::send_ping(&mut status_of_rradio);
+                match status_of_rradio.ping_data.ping_status {
+                    ping::PingStatus::TimedOut => {
+                        println!("timed out\r");
+                        child = ping::send_ping(&mut status_of_rradio);
+                    }
+
+                    ping::PingStatus::PingResponseReceived => {
+                        //we must show the output
+                        let output = get_ping_time(child.wait_with_output(), &mut status_of_rradio);
+                        if status_of_rradio
+                            .ping_data
+                            .number_of_remote_pings_to_this_station
+                            <= config.max_number_of_pings_to_a_remote_destinaton
+                        {
+                            //status_of_rradio.ping_data.reached_number_of_remote_pings = false;
+                        } else {
+                            status_of_rradio.ping_data.reached_number_of_remote_pings = true;
+                            //status_of_rradio.ping_data.destination_to_ping = PingWhat::Local;
+                        }
+                        status_of_rradio.ping_data.toggle_ping_destination();
+
+                        match output {
+                            Ok(_ping_time) => {
+                                println!(
+                                    "{:?}  {} ms\r",
+                                    status_of_rradio.ping_data.destination_of_last_ping,
+                                    status_of_rradio.ping_data.ping_time
+                                );
+                            }
+                            Err(error) => {
+                                eprintln!("got ping error {error}\r")
+                            }
                         }
 
-                        ping::PingStatus::PingResponseReceived => {
-                            //we must show the output
-                            let output =
-                                get_ping_time(child.wait_with_output(), &mut status_of_rradio);
-                            if status_of_rradio
-                                .ping_data
-                                .number_of_remote_pings_to_this_station
-                                <= config.max_number_of_pings_to_a_remote_destinaton
-                            {
-                                status_of_rradio.ping_data.toggle_ping_destination()
-                            }
-                            else {
-                                status_of_rradio.ping_data.destination_to_ping = PingWhat::Local;
-                            }
-                            ;
-                            match output {
-                                Ok(_ping_time) => {
-                                    println!(
-                                        "{:?}  {} ms\r",
-                                        status_of_rradio.ping_data.destination_of_last_ping,
-                                        status_of_rradio.ping_data.ping_time
-                                    );
-                                }
-                                Err(error) => {
-                                    eprintln!("got ping error {error}\r")
-                                }
-                            }
+                        child = ping::send_ping(&mut status_of_rradio);
+                    }
 
-                            child = ping::send_ping(&mut status_of_rradio);
-                        }
-
-                        ping::PingStatus::PingSent => {
-                            see_if_there_is_a_ping_response(&mut child, &mut status_of_rradio);
-                        }
-                        ping::PingStatus::PingNotSent => {
-                            eprintln!("cannot get here\r")
-                        }
+                    ping::PingStatus::PingSent => {
+                        see_if_there_is_a_ping_response(&mut child, &mut status_of_rradio);
+                    }
+                    ping::PingStatus::PingNotSent => {
+                        eprintln!("cannot get here\r")
                     }
                 }
+
                 let event = std::future::poll_fn(|cx| {
                     //First poll the keyboard events source for keyboard events
                     match mapped_keyboard_events.poll_next_unpin(cx) {
@@ -368,10 +367,7 @@ async fn main() -> Result<(), String> {
                             next_track(&mut status_of_rradio, &playbin);
                         }
                         keyboard::Event::PlayStation { channel_number } => {
-                            status_of_rradio.running_status = RunningStatus::RunningNormally;
-                            status_of_rradio
-                                .ping_data
-                                .number_of_remote_pings_to_this_station = 0;
+                            status_of_rradio.initialise_for_new_station();
 
                             if channel_number == status_of_rradio.channel_number {
                                 //status_of_rradio.position_and_duration[status_of_rradio

@@ -12,7 +12,7 @@ use std::{
 
 use crate::{
     get_channel_details::{self, SourceType},
-    ping::PingStatus,
+    ping::{PingStatus, PingWhat},
     player_status,
 };
 use anyhow::Context;
@@ -513,11 +513,12 @@ impl Lc {
         // if playing a stream we have a position but the duration is none
         // if the position is less than x seconds, we display the media type
 
-        let start_line1 = if status_of_rradio.position_and_duration[0]
+        let start_line1 = if status_of_rradio.position_and_duration[status_of_rradio.channel_number]
             .position
             .num_milliseconds()
             < config.time_initial_message_displayed_after_channel_change_as_ms
         {
+            //state for the first few seconds follows
             match status_of_rradio.position_and_duration[status_of_rradio.channel_number]
                 .channel_data
                 .source_type
@@ -527,19 +528,18 @@ impl Lc {
                 _ => format!("Station {}", status_of_rradio.channel_number),
             }
         } else {
+            // the state after the first few seconds
             match status_of_rradio.position_and_duration[status_of_rradio.channel_number]
                 .channel_data
                 .source_type
             {
                 SourceType::Cd | SourceType::Usb => {
-                    let position_secs = status_of_rradio.position_and_duration[status_of_rradio
-                        .position_and_duration[status_of_rradio.channel_number]
-                        .index_to_current_track]
+                    let position_secs = status_of_rradio.position_and_duration
+                        [status_of_rradio.channel_number]
                         .position
                         .num_seconds();
                     if let Some(duration_ms) = status_of_rradio.position_and_duration
-                        [status_of_rradio.position_and_duration[status_of_rradio.channel_number]
-                            .index_to_current_track]
+                        [status_of_rradio.channel_number]
                         .duration_ms
                     {
                         let duration_secs = duration_ms / 1000;
@@ -579,10 +579,24 @@ impl Lc {
                             _ => format!("{track_index}: {position_secs}"),
                         }
                     } else {
-                        "error".to_string()
+                        "source error".to_string()
                     }
                 }
-                _ => get_mute_state::get_mute_state().to_string(),
+
+                SourceType::UrlList => match status_of_rradio.ping_data.destination_of_last_ping {
+                    PingWhat::Local => Lc::format_ping_time(
+                        "LocPing".to_string(),
+                        status_of_rradio.ping_data.ping_time,
+                    ),
+                    PingWhat::Remote => Lc::format_ping_time(
+                        "RemPing".to_string(),
+                        status_of_rradio.ping_data.ping_time,
+                    ),
+                    PingWhat::Nothing => {
+                        format!("CPU Temp {}C", get_temperature::get_cpu_temperature())
+                    }
+                },
+                SourceType::Unknown => "Unknown source".to_string(),
             }
         };
 
@@ -657,6 +671,15 @@ impl Lc {
             LineNum::Line1,
             status_of_rradio.all_4lines.num_lines,
         );
+    }
+
+    /// formats the time so that it fits the LCD screen, assuming the prefix is eg "LocPing"
+    fn format_ping_time(time_prefix: String, ping_time_in_ms: f32) -> String {
+        if ping_time_in_ms < 10.0 {
+            format!("{}{:.width$}ms", time_prefix, ping_time_in_ms, width = 1)
+        } else {
+            format!("{}{:>3}", time_prefix, ping_time_in_ms)
+        }
     }
 
     /// Outputs error message with channel number, IP address, data & time temperature & signal strength;

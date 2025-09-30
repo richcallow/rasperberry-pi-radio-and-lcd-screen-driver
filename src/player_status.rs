@@ -1,11 +1,11 @@
-use chrono::Duration;
+use chrono::{Duration, Utc};
 
 use crate::{
     get_channel_details::{self, ChannelFileDataDecoded},
     lcd::{
         self,
         get_local_ip_address::{self, NetworkData},
-        RunningStatus,
+        get_mute_state, RunningStatus,
     },
     ping,
     read_config::{self, Config},
@@ -57,8 +57,9 @@ pub struct PlayerStatus {
     pub line_1_data: lcd::ScrollData,
     pub line_2_data: lcd::ScrollData,
     pub line_34_data: lcd::ScrollData,
-    /// Stores organisation, a vec of startion URLs & whether or not the last track is a ding
-    ///pub channel_file_data: get_channel_details::ChannelFileDataDecoded,
+    pub time_started_playing_current_station: chrono::DateTime<Utc>,
+
+    /// Stores channel_file_data, organisation, a vec of startion URLs & whether or not the last track is a ding
     pub position_and_duration: [RealTimeDataOnOneChannel; NUMBER_OF_POSSIBLE_CHANNELS + 1], // +1 so there is a channel to play the startup ding
 }
 
@@ -80,9 +81,19 @@ impl PlayerStatus {
             usb_is_mounted: false,
             network_data: NetworkData::new(),
             ping_data: ping::PingData::new(),
+            time_started_playing_current_station: chrono::Utc::now(),
         }
     }
+    /// initialises for a new station, not for a new track
+    pub fn initialise_for_new_station(&mut self) -> () {
+        self.time_started_playing_current_station = chrono::Utc::now();
+        self.running_status = RunningStatus::RunningNormally;
+        self.ping_data.number_of_remote_pings_to_this_station = 0;
+        self.ping_data.destination_to_ping= ping::PingWhat::Local;
+        self.ping_data.reached_number_of_remote_pings = false;
+    }
 
+    /// outputs the config file
     pub fn output_config_information(&self, config: &Config) {
         println!("aural_notifications\t\t{:?}\r", config.aural_notifications);
         println!("buffering_duration\t\t{:?}\r", config.buffering_duration);
@@ -105,7 +116,10 @@ impl PlayerStatus {
             "aural_notifications\t\t{:?}\r",
             config.pause_before_playing_increment
         );
-        println!("max_number_of_pings_to_a_remote_destinaton\t{}\r", config.max_number_of_pings_to_a_remote_destinaton);
+        println!(
+            "max_number_of_pings_to_a_remote_destinaton\t{}\r",
+            config.max_number_of_pings_to_a_remote_destinaton
+        );
 
         println!("scroll\t\t\t\t{:?}\r", config.scroll);
         println!(
@@ -121,8 +135,10 @@ impl PlayerStatus {
         println!("volume_offset\t\t\t{}\r", config.volume_offset);
     }
 
+    /// outputs whether or not the amplifier is muted & the status information
     pub fn output_debug_info(&self) {
         println!("\nstatus of rradio follows\r");
+        println!("mute state is \t\t{}\r", get_mute_state::get_mute_state());
         println!("toml_error\t\t{:?}\r", self.toml_error);
         println!("running_status\t\t{:?}\r", self.running_status);
         println!("channel_number\t\t{}\r", self.channel_number);
@@ -136,6 +152,10 @@ impl PlayerStatus {
         println!("line_1_data\t\t{:?}\r", self.line_1_data);
         println!("line_2_data\t\t{:?}\r", self.line_2_data);
         println!("line_34_data\t\t{:?}\r", self.line_34_data);
+        println!(
+            "time_started_playing_current_station\t{}\r",
+            self.time_started_playing_current_station
+        );
 
         println!("position_and_duration follow if there are any\r");
         for channel_count in 0..self.position_and_duration.len() {

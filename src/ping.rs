@@ -38,6 +38,7 @@ pub struct PingData {
     pub destination_of_last_ping: PingWhat,           // the address we sent the last ping to
     pub ping_time: f32,                               // the time the last ping took
     pub number_of_remote_pings_to_this_station: u32,
+    pub reached_number_of_remote_pings: bool, // specifies if we have reached the number of pings specified in config
 }
 impl PingData {
     pub fn new() -> Self {
@@ -48,30 +49,39 @@ impl PingData {
             destination_of_last_ping: PingWhat::Nothing,
             ping_time: 0.0,
             number_of_remote_pings_to_this_station: 0,
+            reached_number_of_remote_pings: false,
         }
     }
+    /// Toggles between specifying pinging (Local or Remote) & (Local or Nothing)
     pub fn toggle_ping_destination(&mut self) -> () {
         self.destination_to_ping = match self.destination_to_ping {
-            PingWhat::Local =>   PingWhat::Remote,
             PingWhat::Remote => PingWhat::Local,
-            PingWhat::Nothing => PingWhat::Nothing,
+            PingWhat::Local => {
+                if self.reached_number_of_remote_pings {
+                    PingWhat::Nothing
+                } else {
+                    PingWhat::Remote
+                }
+            }
+            PingWhat::Nothing => PingWhat::Local,
         }
     }
 }
-/// sends a ping to the local or remote address as required and sets the flag "destination_of_last_ping accordingly".
-/// panics if it cannot ping.
+/// Sends a ping to the local or remote address as required and sets the flag "destination_of_last_ping accordingly".
+/// Panics if it cannot ping.
+/// Assumes that if destination_to_ping is not Remote, it must ping the local address
 pub fn send_ping(status_of_rradio: &mut player_status::PlayerStatus) -> std::process::Child {
     status_of_rradio.ping_data.destination_of_last_ping =
         status_of_rradio.ping_data.destination_to_ping.clone();
     status_of_rradio.ping_data.ping_status = PingStatus::PingSent;
+    status_of_rradio
+        .ping_data
+        .number_of_remote_pings_to_this_station += 1; // will take > 100 years to overflow; so no concern
     status_of_rradio.ping_data.last_ping_time_of_day = chrono::Utc::now();
-    let address = if status_of_rradio.ping_data.destination_to_ping == PingWhat::Local {
-        status_of_rradio.network_data.gateway_ip_address.to_string()
-    } else {
-        status_of_rradio
-            .ping_data
-            .number_of_remote_pings_to_this_station += 1;
+    let address = if status_of_rradio.ping_data.destination_to_ping == PingWhat::Remote {
         status_of_rradio.network_data.remote_address.clone()
+    } else {
+        status_of_rradio.network_data.gateway_ip_address.to_string()
     };
     Command::new("/bin/ping")
         .args([
