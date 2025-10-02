@@ -12,7 +12,7 @@ use std::{
 
 use crate::{
     get_channel_details::{self, SourceType},
-    ping::{PingStatus, PingWhat},
+    ping::PingWhat,
     player_status,
 };
 use anyhow::Context;
@@ -596,7 +596,7 @@ impl Lc {
                         format!("CPU Temp {}C", get_temperature::get_cpu_temperature())
                     }
                 },
-                SourceType::Unknown => "Unknown source".to_string(),
+                SourceType::UnknownSourceType => "Unknown source".to_string(),
             }
         };
 
@@ -698,6 +698,12 @@ impl Lc {
             LINE1_DATA_CHAR_COUNT,
             VOLUME_CHAR_COUNT,
         );
+
+        text_buffer.write_text_to_single_line(
+            status_of_rradio.network_data.local_ip_address.bytes(),
+            LineNum::Line2,
+        );
+
         text_buffer.write_text_to_single_line(
             Lc::get_current_date_and_time_text().bytes(),
             LineNum::Line3,

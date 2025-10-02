@@ -5,11 +5,7 @@
 use std::{fs, os::fd::AsRawFd};
 use substring::Substring;
 
-use crate::{
-    gstreamer_interfaces::PlaybinElement,
-    lcd,
-    player_status::{self, PlayerStatus},
-};
+use crate::{gstreamer_interfaces::PlaybinElement, lcd, player_status::PlayerStatus};
 pub mod cd_functions;
 mod mount_ext;
 
@@ -29,7 +25,8 @@ pub struct ChannelFileDataFromTOML {
 #[derive(Debug, PartialEq, Clone, Copy)]
 /// enum of the possible media types
 pub enum SourceType {
-    Unknown,
+    /// will be unknown if the channel cannot be found.
+    UnknownSourceType,
     /// a list of URLs to play
     UrlList,
     Cd,
@@ -54,7 +51,7 @@ impl ChannelFileDataDecoded {
         Self {
             organisation: String::new(),
             station_urls: vec![],
-            source_type: SourceType::Unknown,
+            source_type: SourceType::UnknownSourceType,
             last_track_is_a_ding: false,
         }
     }
@@ -468,7 +465,8 @@ pub fn get_channel_details_and_implement_them(
     config: &crate::read_config::Config,
     status_of_rradio: &mut PlayerStatus,
     playbin: &PlaybinElement,
-) -> Result<(), String> {
+    previous_channel_number: usize,
+) -> Result<(), ChannelErrorEvents> {
     match get_channel_details(config, status_of_rradio) {
         Ok(new_channel_file_data) => {
             status_of_rradio.toml_error = None;
@@ -478,21 +476,16 @@ pub fn get_channel_details_and_implement_them(
             Ok(())
         }
         Err(get_channel_details_error) => {
-            status_of_rradio.channel_number = player_status::START_UP_DING_CHANNEL_NUMER;
-
             if let ChannelErrorEvents::CouldNotFindChannelFile = get_channel_details_error {
-                /*if (status_of_rradio.running_status
-                    == lcd::RunningStatus::NoChannel)
-                    && (status_of_rradio.channel_number
-                        == status_of_rradio.previous_channel_number)
+                if (status_of_rradio.running_status == lcd::RunningStatus::NoChannel)
+                    && (status_of_rradio.channel_number == previous_channel_number)
                 {
                     status_of_rradio.toml_error = None; // clear the TOML error out, the user must have seen it by now
-                    status_of_rradio.running_status =
-                        lcd::RunningStatus::NoChannelRepeated;
+                    status_of_rradio.running_status = lcd::RunningStatus::NoChannelRepeated;
                 } else {
-                    status_of_rradio.running_status =
-                        lcd::RunningStatus::NoChannel;
-                }*/
+                    status_of_rradio.running_status = lcd::RunningStatus::NoChannel;
+                }
+                //status_of_rradio.running_status = lcd::RunningStatus::NoChannel;
 
                 if let Some(ding_filename) = &config.aural_notifications.filename_error {
                     // play a ding if one has been specified
@@ -511,10 +504,7 @@ pub fn get_channel_details_and_implement_them(
                     .update_if_changed(get_channel_details_error.to_lcd_screen().as_str());
                 status_of_rradio.running_status = lcd::RunningStatus::LongMessageOnAll4Lines;
             };
-            Err(format!(
-                "got channel detail error {}\r",
-                &get_channel_details_error.to_lcd_screen()
-            ))
+            Err(get_channel_details_error)
         }
     }
 }

@@ -11,14 +11,14 @@ use get_channel_details::{ChannelErrorEvents, SourceType};
 
 use gstreamer::prelude::ElementExtManual;
 use gstreamer_interfaces::PlaybinElement;
-use player_status::{PlayerStatus, RealTimeDataOnOneChannel};
+use player_status::PlayerStatus;
 
-use std::{task::Poll, time::Instant};
+use std::task::Poll;
 
 use crate::{
     get_channel_details::get_channel_details_and_implement_them,
     lcd::get_local_ip_address,
-    ping::{get_ping_time, see_if_there_is_a_ping_response, PingWhat},
+    ping::{get_ping_time, see_if_there_is_a_ping_response},
     player_status::NUMBER_OF_POSSIBLE_CHANNELS,
 };
 use lcd::{RunningStatus, ScrollData, TextBuffer};
@@ -369,23 +369,64 @@ async fn main() -> Result<(), String> {
                         keyboard::Event::PlayStation { channel_number } => {
                             status_of_rradio.initialise_for_new_station();
 
-                            if channel_number == status_of_rradio.channel_number {
-                                //status_of_rradio.position_and_duration[status_of_rradio
-                                //    .position_and_duration[status_of_rradio.channel_number]
-                                //    .index_to_current_track] = RealTimeDataOnOneChannel::new();
+                            if channel_number == status_of_rradio.channel_number
+                                && status_of_rradio.running_status == RunningStatus::NoChannel
+                            {
+                                status_of_rradio.running_status = RunningStatus::NoChannelRepeated;
                             } else {
                                 status_of_rradio.line_2_data.update_if_changed("");
                                 status_of_rradio.line_34_data.update_if_changed("");
+                                let previous_channel_number = status_of_rradio.channel_number;
                                 status_of_rradio.channel_number = channel_number;
-                                // update channel
 
-                                if let Err(error_message) = get_channel_details_and_implement_them(
+                                if let Err(the_error) = get_channel_details_and_implement_them(
                                     &config,
                                     &mut status_of_rradio,
                                     &playbin,
+                                    previous_channel_number,
                                 ) {
-                                    eprintln!("{}", error_message)
-                                };
+                                    eprintln!(
+                                        "Got channel detail error {}\r",
+                                        &the_error.to_lcd_screen()
+                                    );
+
+                                    if let ChannelErrorEvents::CouldNotFindChannelFile = the_error {
+                                        println!(
+                                            "status_of_rradio.running_status{:?} \r",
+                                            status_of_rradio.running_status,
+                                        );
+
+                                        status_of_rradio.toml_error = None; // clear the TOML error out, the user must have seen it by now
+                                        status_of_rradio.running_status =
+                                            if previous_channel_number == channel_number {
+                                                RunningStatus::NoChannelRepeated
+                                            } else {
+                                                RunningStatus::NoChannel
+                                            };
+                                        if let Some(ding_filename) =
+                                            &config.aural_notifications.filename_error
+                                        {
+                                            // play a ding if one has been specified
+                                            status_of_rradio.position_and_duration
+                                                [status_of_rradio.channel_number]
+                                                .channel_data
+                                                .station_urls =
+                                                vec![format!("file://{ding_filename}")];
+                                            //status_of_rradio.index_to_current_track = 0;
+                                            let _ignore_error_if_beep_fails =
+                                                playbin.play_track(&status_of_rradio);
+                                            status_of_rradio.position_and_duration
+                                                [status_of_rradio.channel_number]
+                                                .index_to_current_track = 0;
+                                        }
+                                    } else {
+                                        status_of_rradio
+                                            .all_4lines
+                                            .update_if_changed(the_error.to_lcd_screen().as_str());
+                                        status_of_rradio.running_status =
+                                            RunningStatus::LongMessageOnAll4Lines;
+                                    };
+                                }
                             }
 
                             if let Err(playbin_error_message) =
@@ -403,64 +444,6 @@ async fn main() -> Result<(), String> {
                                     .line_2_data
                                     .update_if_changed(line2.as_str());
                             }
-
-                            /*
-                            Err(the_error) => {
-                                println!(
-                                    "got channel detail error {}\r",
-                                    &the_error.to_lcd_screen()
-                                );
-
-                                if let ChannelErrorEvents::CouldNotFindChannelFile = the_error {
-                                    println!(
-                                        "status_of_rradio.running_status{:?} prev chan{:?}\r",
-                                        status_of_rradio.running_status,
-                                        status_of_rradio.previous_channel_number
-                                    );
-
-                                    if (status_of_rradio.running_status
-                                        == lcd::RunningStatus::NoChannel)
-                                        && (status_of_rradio.channel_number
-                                            == status_of_rradio.previous_channel_number)
-                                    {
-                                        status_of_rradio.toml_error = None; // clear the TOML error out, the user must have seen it by now
-                                        status_of_rradio.running_status =
-                                            lcd::RunningStatus::NoChannelRepeated;
-                                    } else {
-                                        status_of_rradio.running_status =
-                                            lcd::RunningStatus::NoChannel;
-                                    }
-
-                                    if let Some(ding_filename) =
-                                        &config.aural_notifications.filename_error
-                                    {
-                                        // play a ding if one has been specified
-                                        status_of_rradio.position_and_duration
-                                            [status_of_rradio.channel_number]
-                                            .channel_data
-                                            .station_urls =
-                                            vec![format!("file://{ding_filename}")];
-                                        status_of_rradio.position_and_duration
-                                            [status_of_rradio.channel_number]
-                                            .index_to_current_track = 0;
-                                        let _ignore_error_if_beep_fails =
-                                            playbin.play_track(&status_of_rradio);
-                                        status_of_rradio.position_and_duration
-                                            [status_of_rradio.channel_number]
-                                            .index_to_current_track = 0;
-                                    }
-                                } else {
-                                    status_of_rradio
-                                        .all_4lines
-                                        .update_if_changed(the_error.to_lcd_screen().as_str());
-                                    status_of_rradio.running_status =
-                                        RunningStatus::LongMessageOnAll4Lines;
-                                };
-                                //status_of_rradio.initialise_for_new_station();
-                                //do not remember we played a ding
-                            }
-                            }
-                            */
                         }
                         keyboard::Event::OutputStatusDebug => {
                             status_of_rradio.output_debug_info();
@@ -695,12 +678,20 @@ fn generate_line2(status_of_rradio: &PlayerStatus) -> String {
             .channel_data
             .organisation
             .to_string(),
-        _ => format!(
-            "Unexpected source type {:?}",
-            status_of_rradio.position_and_duration[status_of_rradio.channel_number]
-                .channel_data
-                .source_type,
-        ),
+        _ => {
+            println!(
+                "got source type {:?}\r",
+                status_of_rradio.position_and_duration[status_of_rradio.channel_number]
+                    .channel_data
+                    .source_type
+            );
+            format!(
+                "Unexpected source type {:?}",
+                status_of_rradio.position_and_duration[status_of_rradio.channel_number]
+                    .channel_data
+                    .source_type,
+            )
+        }
     };
     let throttled_status = lcd::get_throttled::is_throttled();
     if throttled_status.pi_is_throttled {

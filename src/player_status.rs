@@ -84,7 +84,7 @@ impl PlayerStatus {
             time_started_playing_current_station: chrono::Utc::now(),
         }
     }
-    /// initialises for a new station, not for a new track
+    /// initialises for a new station, not for a new track; amongst other things sets RunningStatus::RunningNormally 
     pub fn initialise_for_new_station(&mut self) -> () {
         self.time_started_playing_current_station = chrono::Utc::now();
         self.running_status = RunningStatus::RunningNormally;

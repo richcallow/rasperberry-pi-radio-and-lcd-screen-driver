@@ -1,31 +1,21 @@
-use std::net::IpAddr;
-
 use substring::Substring;
 
 #[derive(Debug)]
 /// if is_valid is true, contains the SSID, local & gateway IP addresses as strings.
 pub struct NetworkData {
     pub ssid: String,
-    pub local_ip_address: IpAddr,
-    pub gateway_ip_address: IpAddr,
+    pub local_ip_address: String, // these are only ever used as a string, so it is simpler to keep them as a string
+    pub gateway_ip_address: String,
     pub is_valid: bool,
     pub remote_address: String,
 }
 impl NetworkData {
-    /// initialises SSID, local & gateway IP addresses to "not known" & sets is_valid false
+    /// initialises SSID, local & gateway IP addresses to 8.8.8.8" & sets is_valid false
     pub fn new() -> Self {
         NetworkData {
             ssid: "not known".to_string(),
-            local_ip_address: IpAddr::V4(
-                "0.0.0.0"
-                    .parse()
-                    .expect("failed to initialise the local IP adddress"),
-            ),
-            gateway_ip_address: IpAddr::V4(
-                "0.0.0.0"
-                    .parse()
-                    .expect("failed to initialise the gateway IP adddress"),
-            ),
+            local_ip_address: "8.8.8.8".to_string(),
+            gateway_ip_address: "8.8.8.8".to_string(),
             is_valid: false,
             remote_address: "192.168.0.3".to_string(), // "www.google.com".to_string(),       // default remote address
         }
@@ -56,19 +46,17 @@ pub fn try_once_to_get_wifi_network_data() -> Result<NetworkData, String> {
                     .trim()
                     .to_string();
 
-                let mut local_ip_address_as_string = output_as_a_vec_of_lines
-                    [local_ip_address_number]
+                let mut local_ip_address = output_as_a_vec_of_lines[local_ip_address_number]
                     .substring(15, output_as_a_vec_of_lines[local_ip_address_number].len())
                     .to_string(); // 15 skips the name of the entry
-                local_ip_address_as_string = local_ip_address_as_string.trim().to_string(); // at this point it has the format 192.168.1.2/23 ie it contains the length too.
+                local_ip_address = local_ip_address.trim().to_string(); // at this point it has the format 192.168.1.2/23 ie it contains the length too.
 
-                if let Some(pos) = local_ip_address_as_string.find("/") {
-                    local_ip_address_as_string = local_ip_address_as_string[0..pos].to_string();
+                if let Some(pos) = local_ip_address.find("/") {
+                    local_ip_address = local_ip_address[0..pos].to_string();
                     // remove the length & the slash that precedes it
                 };
 
-                let gateway_ip_address_as_string = output_as_a_vec_of_lines
-                    [gateway_ip_address_number]
+                let gateway_ip_address = output_as_a_vec_of_lines[gateway_ip_address_number]
                     .substring(
                         15, // 15 skips the name of the entry
                         output_as_a_vec_of_lines[gateway_ip_address_number].len(),
@@ -76,21 +64,13 @@ pub fn try_once_to_get_wifi_network_data() -> Result<NetworkData, String> {
                     .trim()
                     .to_string();
 
-                if let Ok(local_ip_address) = local_ip_address_as_string.parse::<IpAddr>() {
-                    if let Ok(gateway_ip_address) = gateway_ip_address_as_string.parse::<IpAddr>() {
-                        Ok(NetworkData {
-                            ssid,
-                            local_ip_address,
-                            gateway_ip_address,
-                            is_valid: true,
-                            remote_address: "192.168.0.3".to_string(), // "www.google.com".to_string(),
-                        })
-                    } else {
-                        Err(format!("Failed to convert gateway IP address {gateway_ip_address_as_string} to an IP address\r"))
-                    }
-                } else {
-                    Err(format!("Failed to convert local IP address {local_ip_address_as_string} to an IP address\r"))
-                }
+                Ok(NetworkData {
+                    ssid,
+                    local_ip_address,
+                    gateway_ip_address,
+                    is_valid: true,
+                    remote_address: "192.168.0.3".to_string(), // "www.google.com".to_string(),
+                })
             } else {
                 use std::thread::sleep;
                 use std::time::Duration;

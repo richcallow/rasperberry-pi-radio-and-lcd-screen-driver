@@ -5,8 +5,8 @@ use std::process::{Command, Stdio};
 
 use crate::{
     get_channel_details,
-    lcd::{self, Lc, RunningStatus},
-    player_status::{self, PlayerStatus, NUMBER_OF_POSSIBLE_CHANNELS},
+    lcd::RunningStatus,
+    player_status::{self, NUMBER_OF_POSSIBLE_CHANNELS},
 };
 #[derive(Debug, PartialEq)]
 
