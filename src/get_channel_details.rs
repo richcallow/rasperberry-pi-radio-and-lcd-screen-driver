@@ -461,18 +461,28 @@ pub fn get_cd_details(
     })
 }
 
+/// updates status_of_rradio with the new channel data, 
+/// unless previous_channel_number == status_of_rradio.channel_number != previous_channel_number AND data has already been got for the channel
 pub fn get_channel_details_and_implement_them(
     config: &crate::read_config::Config,
     status_of_rradio: &mut PlayerStatus,
     playbin: &PlaybinElement,
     previous_channel_number: usize,
 ) -> Result<(), ChannelErrorEvents> {
+    if (status_of_rradio.channel_number != previous_channel_number)
+        && !(status_of_rradio.position_and_duration[status_of_rradio.channel_number]
+            .channel_data
+            .station_urls
+            .is_empty())
+    {
+        return Ok(());
+    }
     match get_channel_details(config, status_of_rradio) {
         Ok(new_channel_file_data) => {
             status_of_rradio.toml_error = None;
             // set  organisation,  station_urls, source_type,  last_track_is_a_ding
             status_of_rradio.position_and_duration[status_of_rradio.channel_number].channel_data =
-                new_channel_file_data;
+                new_channel_file_data;            
             Ok(())
         }
         Err(get_channel_details_error) => {
@@ -494,7 +504,7 @@ pub fn get_channel_details_and_implement_them(
                         .station_urls = vec![format!("file://{ding_filename}")];
                     status_of_rradio.position_and_duration[status_of_rradio.channel_number]
                         .index_to_current_track = 0;
-                    let _ignore_error_if_beep_fails = playbin.play_track(&status_of_rradio);
+                    let _ignore_error_if_beep_fails = playbin.play_track(&status_of_rradio, false);
                     status_of_rradio.position_and_duration[status_of_rradio.channel_number]
                         .index_to_current_track = 0;
                 }

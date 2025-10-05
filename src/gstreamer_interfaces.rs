@@ -1,9 +1,7 @@
-use crate::player_status;
+use crate::{get_channel_details::{SourceType}, player_status::{self}};
 use glib::object::{Cast, ObjectExt};
-
-use gstreamer::{glib, prelude::ElementExt};
+use gstreamer::{glib, prelude::{ElementExt, ElementExtManual}, SeekFlags};
 use gstreamer_audio::prelude::StreamVolumeExt;
-
 /// The normal maximum for gstreamer that will not overload
 pub const VOLUME_ZERO_DB: i32 = 100;
 /// The lowest possible gstreamer volume
@@ -34,7 +32,7 @@ impl std::ops::Drop for PlaybinElement {
 }
 
 impl PlaybinElement {
-    /// Sets the volume; returns an error message if it fails
+    /// Sets the volume; returns an error string if it fails
     pub fn set_volume(&mut self, volume_wanted: i32) -> Result<(), String> {
         self.playbin_element
             .dynamic_cast_ref::<gstreamer_audio::StreamVolume>()
@@ -81,8 +79,8 @@ impl PlaybinElement {
             .ok_or("failed to get the gstreamer flags class")? // Remember the question mark means return early with the errror message just to the left of it. IE we do not execute the next line if there is an error
             .builder_with_value(current_flags)
             .ok_or("failed to get the flags class builder")? // as above, do not execute the rest if there is an error
-            .unset_by_nick("video") // remove the video flag, which means we cannot process video & do not was time trying to do so.
-            .unset_by_nick("text") // remove the text flag, which means we cannot process subtitles & do not was time trying to do so.
+            .unset_by_nick("video") // remove the video flag, which means we cannot process video & do not waste time trying to do so.
+            .unset_by_nick("text") // remove the text flag, which means we cannot process subtitles & do not waste time trying to do so.
             .build()
             .ok_or("Failed to unset the unwanted gstreamer flags")?; // question mark says "if there is an error,  return from here with the string specified, otherwise continue"
 
@@ -108,7 +106,7 @@ impl PlaybinElement {
         Ok((PlaybinElement { playbin_element }, bus))
     }
 
-    /// set the state of gstreamer to be the one specified
+    /// set the state of gstreamer to be the one specified; we use Paused, Playing or Null
     pub fn set_state(
         &self,
         new_state: gstreamer::State,
@@ -117,45 +115,81 @@ impl PlaybinElement {
     }
 
     /// Plays the first track aka station specified by player_status
+    /// seeks to the previous position if the media is seekable 
     /// If it fails the error message is returned as an Err(String)
-    pub fn play_track(&self, status_of_rradio: &player_status::PlayerStatus) -> Result<(), String> {
+    pub fn play_track(&self, status_of_rradio: &player_status::PlayerStatus, seek_wanted_if_possible: bool) -> Result<(), String> {
         match self.playbin_element
-               .set_state(gstreamer::State::Null)      // we need to set it to null before we can change the station 
+            .set_state(gstreamer::State::Null)      // we need to set it to null before we can change the station 
         {
-        Ok(_state_change_success) => {
+        Ok(_state_change_success) => {          
             if (status_of_rradio.channel_number == player_status::START_UP_DING_CHANNEL_NUMER) && 
-            (status_of_rradio.position_and_duration[player_status::NUMBER_OF_POSSIBLE_CHANNELS].channel_data.station_urls.is_empty()) {return Ok(())}
+                (status_of_rradio.position_and_duration[player_status::NUMBER_OF_POSSIBLE_CHANNELS].channel_data.station_urls.is_empty()) {
+                return Ok(())
+            }
 
             if status_of_rradio.position_and_duration[status_of_rradio.channel_number].index_to_current_track >= 
                     status_of_rradio.position_and_duration[status_of_rradio.channel_number].channel_data.station_urls.len(){
                     // as index_to_current_track is a usize, there is no need to check it it is not negative
-                            println!(
-            "playlist {:?}\r",
-            status_of_rradio.position_and_duration[status_of_rradio.channel_number].channel_data.station_urls);
-                   eprintln!("Index to tracks out of bounds; it is {} and the list has {} elements\r", 
+                   eprintln!("On channel {} Index to tracks out of bounds; it is {} and the list has {} elements\r", 
+                   status_of_rradio.channel_number,
                    status_of_rradio.position_and_duration[status_of_rradio.channel_number].index_to_current_track, status_of_rradio.position_and_duration[status_of_rradio.channel_number].channel_data.station_urls.len());
-                   return  Err(format!("Index to tracks out of bounds; it is {} and the list has {} elements", 
-                   status_of_rradio.position_and_duration[status_of_rradio.channel_number].index_to_current_track, status_of_rradio.position_and_duration[status_of_rradio.channel_number].channel_data.station_urls.len()));
+                   return  Err(format!("On channel {} Index to tracks out of bounds; it is {} and the list has {} elements", 
+                   status_of_rradio.channel_number, status_of_rradio.position_and_duration[status_of_rradio.channel_number].index_to_current_track, 
+                        status_of_rradio.position_and_duration[status_of_rradio.channel_number].channel_data.station_urls.len()));
                 }
 
                 let index_to_current_track = status_of_rradio.position_and_duration[status_of_rradio.channel_number].index_to_current_track;
                 self.playbin_element.set_property(
-                    "uri",              // if "uri" does not exist, it panics, but that does not seem to be anything that can be done about it.
+                    "uri",              
+                    // if "uri" does not exist, it panics, but that does not seem to be anything that can be done about it.
                     &status_of_rradio.position_and_duration[status_of_rradio.channel_number].channel_data.station_urls[index_to_current_track],
                 );
 
                 match self.playbin_element //clone here makes it stop working
                     .set_state(gstreamer::State::Playing)
                 {
-                    Ok(_ok_message) => Ok(()),
+                    Ok(_playing_worked_ok) =>          
+                        {
+                        if seek_wanted_if_possible {
+                            match status_of_rradio.position_and_duration[status_of_rradio.channel_number].channel_data.source_type  {
+                                SourceType::Cd | SourceType::Usb => {
+                                    let seek_time = gstreamer::ClockTime::from_seconds(status_of_rradio.position_and_duration[status_of_rradio.channel_number]
+                                        .position.num_seconds() as u64); // the position we will seek to in the units needed.
+                                    // we use seconds as the unit as that is directly avaialble AND without an "Option"
+                                    let mut can_seek = false; // note we cannot perform a gstreamer seek yet 
+                                   
+                                    for _count in 0..100 { 
+                                        // wait till gstreamer is ready for a seek, or time out if eventually we do not get a position
+                                       if self.playbin_element.query_position::<gstreamer::ClockTime>().is_some() {
+                                            can_seek=true; // as we got a postion, we can now seek
+                                            break
+                                        }
+                                        std::thread::sleep(std::time::Duration::from_millis(50));
+                                    }
+                                    if self.playbin_element.seek_simple(SeekFlags::FLUSH | SeekFlags::KEY_UNIT | SeekFlags::SNAP_NEAREST,seek_time)
+                                            .is_err() 
+                                        {
+                                            return Err(if can_seek  {"Failed to seek"} 
+                                            else {
+                                                "failed to seek, probably because could not get a gstreamer position"}.to_string())
+                                        }
+                                        return Ok(());                               
+                                }
+                                SourceType::UnknownSourceType|SourceType::UrlList => {
+                                    return Ok(()) // we are playing OK & not seeking , so there is nothing to do.
+                                }
+                            } // end of the match
+                        } // end if if seek_wanted
+                        Ok(())},
                     Err(error) => Err(format!(
                         "Error message setting gstreamer to play{:?}",
                         error
                     )),
-
                 }
             },
-            Err(error_message)=> {Err(format!("Failed to set the URL. Got error {:?}",error_message ).to_string())}
+        Err(error_message)=> {
+            Err(format!("Failed to set the URL. Got error {:?}",error_message ).to_string())
+        }
         }
     }
 }

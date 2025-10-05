@@ -167,7 +167,7 @@ async fn main() -> Result<(), String> {
                     [player_status::START_UP_DING_CHANNEL_NUMER]
                     .channel_data
                     .source_type = SourceType::UrlList;
-                if let Err(error_message) = playbin.play_track(&status_of_rradio) {
+                if let Err(error_message) = playbin.play_track(&status_of_rradio, false) {
                     status_of_rradio.all_4lines = ScrollData::new(error_message.as_str(), 4);
                     lcd.write_rradio_status_to_lcd(&status_of_rradio, &config);
                 }
@@ -342,7 +342,7 @@ async fn main() -> Result<(), String> {
                                     .station_urls
                                     .len(); // % is a remainder operator not modulo
                             if let Err(playbin_error_message) =
-                                playbin.play_track(&status_of_rradio)
+                                playbin.play_track(&status_of_rradio, false)
                             {
                                 status_of_rradio.all_4lines.update_if_changed(
                                     format!("When wanting to play the previous track got {playbin_error_message}")
@@ -374,6 +374,7 @@ async fn main() -> Result<(), String> {
                             {
                                 status_of_rradio.running_status = RunningStatus::NoChannelRepeated;
                             } else {
+                                status_of_rradio.running_status = RunningStatus::RunningNormally;
                                 status_of_rradio.line_2_data.update_if_changed("");
                                 status_of_rradio.line_34_data.update_if_changed("");
                                 let previous_channel_number = status_of_rradio.channel_number;
@@ -385,17 +386,7 @@ async fn main() -> Result<(), String> {
                                     &playbin,
                                     previous_channel_number,
                                 ) {
-                                    eprintln!(
-                                        "Got channel detail error {}\r",
-                                        &the_error.to_lcd_screen()
-                                    );
-
                                     if let ChannelErrorEvents::CouldNotFindChannelFile = the_error {
-                                        println!(
-                                            "status_of_rradio.running_status{:?} \r",
-                                            status_of_rradio.running_status,
-                                        );
-
                                         status_of_rradio.toml_error = None; // clear the TOML error out, the user must have seen it by now
                                         status_of_rradio.running_status =
                                             if previous_channel_number == channel_number {
@@ -414,7 +405,7 @@ async fn main() -> Result<(), String> {
                                                 vec![format!("file://{ding_filename}")];
                                             //status_of_rradio.index_to_current_track = 0;
                                             let _ignore_error_if_beep_fails =
-                                                playbin.play_track(&status_of_rradio);
+                                                playbin.play_track(&status_of_rradio, false);
                                             status_of_rradio.position_and_duration
                                                 [status_of_rradio.channel_number]
                                                 .index_to_current_track = 0;
@@ -428,21 +419,20 @@ async fn main() -> Result<(), String> {
                                     };
                                 }
                             }
-
                             if let Err(playbin_error_message) =
-                                playbin.play_track(&status_of_rradio)
+                                playbin.play_track(&status_of_rradio, true)
                             {
                                 status_of_rradio.all_4lines.update_if_changed(
-                                    format!("When playing a track got {playbin_error_message}")
-                                        .as_str(),
-                                );
+                                    format!("When playing a track on channel {} got {playbin_error_message}", status_of_rradio.channel_number)
+                                        .as_str());
                                 status_of_rradio.running_status =
                                     RunningStatus::LongMessageOnAll4Lines;
                             } else {
+                                // play worked
                                 let line2 = generate_line2(&status_of_rradio);
                                 status_of_rradio
                                     .line_2_data
-                                    .update_if_changed(line2.as_str());
+                                    .update_if_changed(line2.as_str())
                             }
                         }
                         keyboard::Event::OutputStatusDebug => {
@@ -528,7 +518,6 @@ async fn main() -> Result<(), String> {
                                     // we only want stage changes from playbin0
                                 }) {
                                     status_of_rradio.gstreamer_state = state_changed.current();
-                                    /*println!("statechanged {:?}\r", status_of_rradio);*/
                                     change_volume(0, &config, &mut status_of_rradio, &mut playbin);
                                 }
                             }
@@ -712,7 +701,7 @@ fn next_track(status_of_rradio: &mut PlayerStatus, playbin: &PlaybinElement) {
             .channel_data
             .station_urls
             .len();
-    if let Err(playbin_error_message) = playbin.play_track(status_of_rradio) {
+    if let Err(playbin_error_message) = playbin.play_track(status_of_rradio, false) {
         status_of_rradio.all_4lines.update_if_changed(
             format!(
                 "When wanting to play the next track playing a track got {playbin_error_message}"

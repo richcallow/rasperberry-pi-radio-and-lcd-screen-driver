@@ -221,25 +221,6 @@ impl PlayerStatus {
         }
     }
 
-    pub fn update_channel_file_data(
-        &mut self,
-        channel_number: usize,
-        new_channel_file_data: ChannelFileDataDecoded,
-    ) {
-        self.toml_error = None; // clear out the toml error if there is one
-
-        self.running_status = lcd::RunningStatus::RunningNormally;
-        self.ping_data.destination_to_ping = if self.position_and_duration[self.channel_number]
-            .channel_data
-            .source_type
-            == get_channel_details::SourceType::UrlList
-        {
-            ping::PingWhat::Local
-        } else {
-            ping::PingWhat::Nothing
-        }
-    }
-
     /// Tries multiple times to get the WiFi data & store it in self.network_data.
     /// Sets self.running_status to RunningStatus::LongMessageOnAll4Lines so that its attempts can be seen on the LCD screen
     /// Sets self.running_status to RunningStatus::Startingup if successful
