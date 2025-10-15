@@ -74,7 +74,7 @@ impl PlayerStatus {
         PlayerStatus {
             toml_error: None,
             running_status: lcd::RunningStatus::Startingup,
-            channel_number: NUMBER_OF_POSSIBLE_CHANNELS + 2, // an invalid value that cannot match as must be in the range 0 to 100 inclusive (Ding channel is 100)
+            channel_number: NUMBER_OF_POSSIBLE_CHANNELS + 1, // an invalid value that cannot match as must be in the range 0 to 100 inclusive (Ding channel is 100)
             position_and_duration: std::array::from_fn(|_index| RealTimeDataOnOneChannel::new()),
             all_4lines: lcd::ScrollData::new("", 4),
             line_1_data: lcd::ScrollData::new("", 1),
@@ -116,7 +116,7 @@ impl PlayerStatus {
             config.maximum_error_recovery_attempts
         );
         println!(
-            "aural_notifications\t\t{:?}\r",
+            "pause_before_playing_increment\t\t{:?}\r",
             config.pause_before_playing_increment
         );
         println!(

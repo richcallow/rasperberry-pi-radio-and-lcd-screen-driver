@@ -1,5 +1,6 @@
 // sends & receives pings & gets the ping time
 use std::process::{Command, Stdio};
+//use pnet_packet::ip;
 use substring::Substring;
 
 use crate::{
@@ -37,7 +38,8 @@ impl PingWhere {
         match self {
             PingWhere::Local => "LocPing".to_string(),
             PingWhere::Remote => "RemPing".to_string(),
-            PingWhere::Nothing => "No dest".to_string(),
+            PingWhere::Nothing => {               
+                "No dest".to_string()},
         }
     }
     /// converts to a single character, when space is very much at a premium
@@ -84,12 +86,14 @@ pub fn send_ping(
     status_of_rradio: &mut player_status::PlayerStatus,
     config: &crate::read_config::Config,
 ) -> std::process::Child {
+   
+    
     status_of_rradio.ping_data.last_ping_time_of_day = chrono::Utc::now();
 
     let number_of_remote_pings_to_this_channel =
         status_of_rradio.ping_data.number_of_pings_to_this_channel;
 
-    let address = if (number_of_remote_pings_to_this_channel % 2 == 0)
+    let address = if (number_of_remote_pings_to_this_channel % 2 != 0)
         || (number_of_remote_pings_to_this_channel > config.max_number_of_remote_pings)
     {
         status_of_rradio.network_data.gateway_ip_address.to_string()
@@ -124,7 +128,7 @@ pub fn send_ping(
 pub fn see_if_there_is_a_ping_response(status_of_rradio: &mut player_status::PlayerStatus) {
     // must not ping too frequently; so return without doing anything if the previous ping is recent or we should not be sending pings
     if ((chrono::Utc::now() - status_of_rradio.ping_data.last_ping_time_of_day).num_milliseconds()
-        > 2000)
+        > 3000)
         && (status_of_rradio.channel_number <= NUMBER_OF_POSSIBLE_CHANNELS)// only ping valid channels
         && ((status_of_rradio.position_and_duration[status_of_rradio.channel_number]
             .channel_data
@@ -150,7 +154,6 @@ pub fn get_ping_time(
             let mut ip_address = unsafe { String::from_utf8_unchecked(output.stdout) }; // convert the output, which is a series of bytes, to a string
 
             ip_address = ip_address.substring(5, ip_address.len()).to_string(); // remove the leading characters which are "PING"
-
             if let Some(position_of_end_of_ip_address) = ip_address.find(" ") {
                 // find the space after the IP address
                 let mut rest_of_string = ip_address.split_off(position_of_end_of_ip_address);

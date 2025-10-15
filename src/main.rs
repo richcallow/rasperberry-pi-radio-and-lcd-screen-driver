@@ -5,7 +5,6 @@
 compile_error!("You must compile this on linux");
 
 use chrono::TimeDelta;
-//use crossterm::event;
 use futures_util::StreamExt;
 use get_channel_details::{ChannelErrorEvents, SourceType};
 
@@ -13,7 +12,7 @@ use gstreamer::prelude::ElementExtManual;
 use gstreamer_interfaces::PlaybinElement;
 use player_status::PlayerStatus;
 
-use std::{process::Child, task::Poll};
+use std::task::Poll;
 
 use crate::{
     get_channel_details::store_channel_details_and_implement_them,
@@ -132,8 +131,7 @@ async fn main() -> Result<(), String> {
             }
         };
     }
-    lcd.write_rradio_status_to_lcd(&status_of_rradio, &config);
-
+    
     if gstreamer::init().is_err() {
         status_of_rradio.all_4lines = ScrollData::new("Failed it to intialise gstreamer", 4);
         status_of_rradio.running_status = lcd::RunningStatus::LongMessageOnAll4Lines;
@@ -193,8 +191,7 @@ async fn main() -> Result<(), String> {
             )
             .map(Event::Ticker);
 
-            let mut child_ping: Child;
-            child = ping::send_ping(&mut status_of_rradio, &config);
+            let mut child_ping = ping::send_ping(&mut status_of_rradio, &config);
 
             loop {
                 if status_of_rradio.ping_data.can_send_ping {
