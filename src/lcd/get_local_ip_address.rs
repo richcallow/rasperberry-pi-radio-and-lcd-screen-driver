@@ -7,7 +7,6 @@ pub struct NetworkData {
     pub local_ip_address: String, // these are only ever used as a string, so it is simpler to keep them as a string
     pub gateway_ip_address: String,
     pub is_valid: bool,
-    pub remote_address: String,
 }
 impl NetworkData {
     /// initialises SSID, local & gateway IP addresses to 8.8.8.8" & sets is_valid false
@@ -17,7 +16,6 @@ impl NetworkData {
             local_ip_address: "8.8.8.8".to_string(),
             gateway_ip_address: "8.8.8.8".to_string(),
             is_valid: false,
-            remote_address: "192.168.0.3".to_string(), // "www.google.com".to_string(),       // default remote address
         }
     }
 }
@@ -69,7 +67,6 @@ pub fn try_once_to_get_wifi_network_data() -> Result<NetworkData, String> {
                     local_ip_address,
                     gateway_ip_address,
                     is_valid: true,
-                    remote_address: "192.168.0.3".to_string(), // "www.google.com".to_string(),
                 })
             } else {
                 use std::thread::sleep;

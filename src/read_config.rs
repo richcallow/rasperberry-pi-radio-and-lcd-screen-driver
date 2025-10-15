@@ -35,9 +35,11 @@ pub struct Config {
     #[serde(with = "humantime_serde")]
     pub error_recovery_attempt_count_reset_time: Option<Duration>,
 
-    pub scroll: Scroll,
-
     pub time_initial_message_displayed_after_channel_change_as_ms: i64,
+
+    pub max_number_of_remote_pings: u32,
+
+    pub scroll: Scroll,
 
     /// Notification sounds
     pub aural_notifications: AuralNotifications,
@@ -45,8 +47,6 @@ pub struct Config {
     pub cd_channel_number: Option<usize>, // in the range 0 to 99 inclusive
 
     pub usb: Option<Usb>,
-
-    pub max_number_of_pings_to_a_remote_destinaton: u32,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -55,7 +55,7 @@ pub struct Usb {
     pub channel_number: usize, // in the range 0 to 99 inclusive
     /// eg device = "/dev/sda1"
     pub device: String,
-    /// Folder where the USB drive is mounted
+    /// Folder where the USB drive is to be mounted
     pub mount_folder: String,
 }
 
@@ -107,7 +107,7 @@ impl Default for Config {
             aural_notifications: AuralNotifications::default(),
             cd_channel_number: None,
             usb: None,
-            max_number_of_pings_to_a_remote_destinaton: 15,
+            max_number_of_remote_pings: 15,
         }
     }
 }

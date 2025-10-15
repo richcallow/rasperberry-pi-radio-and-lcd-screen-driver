@@ -12,14 +12,11 @@ use std::{
 
 use crate::{
     get_channel_details::{self, SourceType},
-    ping::PingWhat,
+    ping::PingTimeAndDestination,
     player_status,
 };
 use anyhow::Context;
 use substring::Substring;
-/*use crossterm::cursor::position;
-use nix::NixPath;
-use rppal::uart::Status;*/
 
 mod character_pattern;
 pub mod get_local_ip_address;
@@ -47,12 +44,13 @@ pub enum RunningStatus {
     NoChannelRepeated,
     /// the state when there is no error message, & neither starting up nor shutting down
     RunningNormally,
+    /// there is a long error message that uses all 4 lines & probably needs to scroll
     LongMessageOnAll4Lines,
     ShuttingDown,
 }
 
 /// The display is visually 20 * 4 characters
-pub const NUM_CHARACTERS_PER_LINE: usize = 20; //
+pub const NUM_CHARACTERS_PER_LINE: usize = 20;
 pub const NUM_CHARACTERS_PER_SCREEN: usize = 4 * NUM_CHARACTERS_PER_LINE;
 
 /// Number of characters needed to display the volume (or anything put in place of the volume)
@@ -143,11 +141,11 @@ impl ScrollData {
     }
 
     /// Given a scrollable line, if it is time to scroll, updates the scroll position & last_update_time.
-    /// or does nothing i fit is not yet time to scroll
+    /// or does nothing if it is not yet time to scroll
     pub fn update_scroll(
         &mut self,
         config: &crate::read_config::Config, // the data read from rradio's config.toml
-        number_of_available_characters: usize,
+        number_of_available_characters: usize, // in some cases some characters at the end of the line are reserved for other strings
     ) {
         if (self.text.bytes.len() <= number_of_available_characters)
             || (self.last_update_time.elapsed()
@@ -340,10 +338,10 @@ impl Lc {
         const LCD_ALREADY_IN_USE: i32 = 16; // another version of the program is probably using it
         const INSUFFICIENT_PRIVILEGE: i32 = 13;
 
-        if let Err(g) = std::fs::File::options().write(true).open("/dev/lcd") {
-            if let Some(INSUFFICIENT_PRIVILEGE) = g.raw_os_error() {
+        if let Err(error) = std::fs::File::options().write(true).open("/dev/lcd") {
+            if let Some(INSUFFICIENT_PRIVILEGE) = error.raw_os_error() {
                 anyhow::bail!("Failed to open LCD file. Are you running with root privilege");
-            } else if let Some(LCD_ALREADY_IN_USE) = g.raw_os_error() {
+            } else if let Some(LCD_ALREADY_IN_USE) = error.raw_os_error() {
                 //the error is that a copy of the program is already running so get its PID & then kill it
                 match std::process::Command::new("/bin/ps") 
                 // command is ps -C program_name // where program_name is the name of the program 
@@ -414,14 +412,6 @@ impl Lc {
             text_buffer.write_text_to_lines(toml_error.bytes(), LineNum::Line1, 4);
             self.write_text_buffer_to_lcd(&text_buffer);
         } else {
-            /*println!(
-                "channel number {}  position & duration {:?} {:?}\r",
-                status_of_rradio.channel_number,
-                status_of_rradio.position_and_duration[status_of_rradio.index_to_current_track]
-                    .position,
-                status_of_rradio.position_and_duration[status_of_rradio.index_to_current_track]
-                    .duration_ms
-            );*/
             let mut text_buffer = TextBuffer::new();
 
             match status_of_rradio.running_status {
@@ -456,13 +446,13 @@ impl Lc {
                 if let Err(err) = write!(self.lcd_file, "\x1b[Lx0y{line_number};") {
                     // move the cursor to the start of the specified line
                     eprintln!(
-                        "in write_rradio_status_to_lcd, Failed to write move the cursor : {err}"
+                        "In write_rradio_status_to_lcd, Failed to write move the cursor : {err}\r"
                     );
                     return;
                 }
                 // & then write the text
                 if let Err(err) = self.lcd_file.write_all(line) {
-                    eprintln!("in write_rradio_status_to_lcd, Failed to write text : {err}");
+                    eprintln!("In write_rradio_status_to_lcd, Failed to write text : {err}\r");
                     return;
                 }
             }
@@ -478,18 +468,10 @@ impl Lc {
             text_buffer
                 .write_text_to_single_line(status_of_rradio.line_1_data.bytes(), LineNum::Line1);
         }
-        let ping_message;
-        match status_of_rradio.ping_data.destination_of_last_ping {
-            crate::ping::PingWhat::Local => {
-                ping_message = format!("Local ping {}ms", &status_of_rradio.ping_data.ping_time);
-            }
-            crate::ping::PingWhat::Remote => {
-                ping_message = format!("Remote ping {}ms", status_of_rradio.ping_data.ping_time);
-            }
-            crate::ping::PingWhat::Nothing => {
-                ping_message = "ping error: no ping destination".to_string();
-            }
-        }
+
+        let ping_message =
+            Lc::format_ping_time(&status_of_rradio.ping_data.ping_time_and_destination, true);
+
         text_buffer.write_text_to_single_line(ping_message.bytes(), LineNum::Line2);
 
         text_buffer.write_text_to_single_line(
@@ -583,19 +565,19 @@ impl Lc {
                     }
                 }
 
-                SourceType::UrlList => match status_of_rradio.ping_data.destination_of_last_ping {
-                    PingWhat::Local => Lc::format_ping_time(
-                        "LocPing".to_string(),
-                        status_of_rradio.ping_data.ping_time,
-                    ),
-                    PingWhat::Remote => Lc::format_ping_time(
-                        "RemPing".to_string(),
-                        status_of_rradio.ping_data.ping_time,
-                    ),
-                    PingWhat::Nothing => {
+                SourceType::UrlList => {
+                    if (status_of_rradio.ping_data.number_of_pings_to_this_channel
+                        <= config.max_number_of_remote_pings)
+                        || (status_of_rradio.ping_data.number_of_pings_to_this_channel % 2 == 0)
+                    {
+                        Lc::format_ping_time(
+                            &status_of_rradio.ping_data.ping_time_and_destination,
+                            false,
+                        )
+                    } else {
                         format!("CPU Temp {}C", get_temperature::get_cpu_temperature())
                     }
-                },
+                }
                 SourceType::UnknownSourceType => "Unknown source".to_string(),
             }
         };
@@ -673,12 +655,39 @@ impl Lc {
         );
     }
 
-    /// formats the time so that it fits the LCD screen, assuming the prefix is eg "LocPing"
-    fn format_ping_time(time_prefix: String, ping_time_in_ms: f32) -> String {
-        if ping_time_in_ms < 10.0 {
-            format!("{}{:.width$}ms", time_prefix, ping_time_in_ms, width = 1)
+    /// formats the time so that it fits the LCD screen
+    fn format_ping_time(
+        ping_time_and_destination: &PingTimeAndDestination,
+        long_string_wanted: bool,
+    ) -> String {
+        if let Some(ping_time_in_ms) = ping_time_and_destination.time_in_ms {
+            let destination = if long_string_wanted {
+                ping_time_and_destination.destination.to_long_string()
+            } else {
+                ping_time_and_destination.destination.to_short_string()
+            };
+            match ping_time_in_ms {
+                f32::MIN..0.0 => "NegTime".to_string(),
+
+                0.0..99.9999999 => {
+                    format!("{}{:.width$}ms", destination, ping_time_in_ms, width = 1)
+                }
+                _ => {
+                    format!("{}{:.width$}ms", destination, ping_time_in_ms, width = 0)
+                }
+            }
         } else {
-            format!("{}{:>3}", time_prefix, ping_time_in_ms)
+            if long_string_wanted {
+                format!(
+                    "{}Ping NoReply",
+                    ping_time_and_destination.destination.to_short_string()
+                )
+            } else {
+                format!(
+                    "{}Ping Noreply",
+                    ping_time_and_destination.destination.to_single_character()
+                )
+            }
         }
     }
 

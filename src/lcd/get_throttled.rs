@@ -1,4 +1,6 @@
+
 /// A struct to allow us to return both the success as a bool & a String
+#[derive (Debug)]
 pub struct ThrottledAsStruct {
     pub pi_is_throttled: bool, // true if the Pi is throttled
     pub result: String, // a 13 to 17 character string which is the result of vcgencmd get_throttled, or an error message as string of unknown length.

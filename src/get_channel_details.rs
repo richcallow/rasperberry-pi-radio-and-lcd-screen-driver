@@ -84,7 +84,7 @@ pub enum ChannelErrorEvents {
         error_message: String,
     },
 
-    /// Could not find the album specifed in the play list, possibly becuase the wrong memory stick is inserted
+    /// Could not find the album specifed in the play list, possibly because the wrong memory stick is inserted
     CouldNotFindAlbum(String),
 
     /// no USB device, but one was requested.
@@ -461,9 +461,9 @@ pub fn get_cd_details(
     })
 }
 
-/// updates status_of_rradio with the new channel data, 
+/// updates status_of_rradio with the new channel data,
 /// unless previous_channel_number == status_of_rradio.channel_number != previous_channel_number AND data has already been got for the channel
-pub fn get_channel_details_and_implement_them(
+pub fn store_channel_details_and_implement_them(
     config: &crate::read_config::Config,
     status_of_rradio: &mut PlayerStatus,
     playbin: &PlaybinElement,
@@ -480,9 +480,25 @@ pub fn get_channel_details_and_implement_them(
     match get_channel_details(config, status_of_rradio) {
         Ok(new_channel_file_data) => {
             status_of_rradio.toml_error = None;
+
+            let mut source_address = new_channel_file_data.station_urls[0].clone();
+
+            if let Some(position_double_slash) = source_address.find("//") {
+                let mut address_to_ping = source_address
+                    .split_off(position_double_slash + 2)
+                    .to_string(); // we add +2 to split after the //
+                                  // next if there is a suffix, we must remove it
+                if let Some(position_first_single_slash) = address_to_ping.find('/') {
+                    let _suffix = address_to_ping.split_off(position_first_single_slash);
+                } // else there was no suffix so do nothing;
+                status_of_rradio.position_and_duration[status_of_rradio.channel_number]
+                    .address_to_ping = address_to_ping;
+            }
+
             // set  organisation,  station_urls, source_type,  last_track_is_a_ding
             status_of_rradio.position_and_duration[status_of_rradio.channel_number].channel_data =
-                new_channel_file_data;            
+                new_channel_file_data;
+
             Ok(())
         }
         Err(get_channel_details_error) => {
@@ -588,7 +604,18 @@ fn get_channel_details(
                 if toml_data.playlist_device.is_some() {
                     return set_up_playlist(toml_data, config, &mut *status_of_rradio);
                 // it is a playlist, not a simple USB system
+                } else if toml_data.station_url.is_empty() {
+                    return Err(ChannelErrorEvents::CouldNotParseChannelFile {
+                        channel_number: status_of_rradio.channel_number,
+                        error_message: "No URLs etc specified".to_string(),
+                    });
                 } else {
+                    /*if toml_data.station_url.is_empty() {
+                        return Err(ChannelErrorEvents::CouldNotParseChannelFile {
+                            channel_number: status_of_rradio.channel_number,
+                            error_message: "No URLs etc specified".to_string(),
+                        });
+                    }*/
                     return Ok(ChannelFileDataDecoded {
                         organisation: toml_data.organisation,
                         station_urls: toml_data.station_url,

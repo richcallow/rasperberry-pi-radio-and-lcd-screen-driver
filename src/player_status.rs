@@ -20,15 +20,19 @@ pub struct RealTimeDataOnOneChannel {
     pub index_to_current_track: usize,
     pub position: Duration,
     pub duration_ms: Option<u64>,
+    /// the address to ping is derived from the first station in the list
+    /// after stripping off the prefix & suffix
+    pub address_to_ping: String,
 }
 impl RealTimeDataOnOneChannel {
     pub fn new() -> Self {
         Self {
             channel_data: get_channel_details::ChannelFileDataDecoded::new(),
+            artist: String::new(),
             index_to_current_track: 0,
             position: Duration::seconds(0),
             duration_ms: None,
-            artist: String::new(),
+            address_to_ping: "8.8.8.8".to_string(), // a default value in case we do not find a valid address
         }
     }
 }
@@ -50,6 +54,7 @@ pub struct PlayerStatus {
     pub buffering_percent: i32,
     /// stores SSID, local IP address & gateway address
     pub network_data: get_local_ip_address::NetworkData,
+
     /// true if the USB is mounted locally
     pub usb_is_mounted: bool,
     pub ping_data: ping::PingData,
@@ -84,13 +89,11 @@ impl PlayerStatus {
             time_started_playing_current_station: chrono::Utc::now(),
         }
     }
-    /// initialises for a new station, not for a new track; amongst other things sets RunningStatus::RunningNormally 
+    /// initialises for a new station, not for a new track; amongst other things sets RunningStatus::RunningNormally
     pub fn initialise_for_new_station(&mut self) -> () {
         self.time_started_playing_current_station = chrono::Utc::now();
         self.running_status = RunningStatus::RunningNormally;
-        self.ping_data.number_of_remote_pings_to_this_station = 0;
-        self.ping_data.destination_to_ping= ping::PingWhat::Local;
-        self.ping_data.reached_number_of_remote_pings = false;
+        self.ping_data.number_of_pings_to_this_channel = 0; 
     }
 
     /// outputs the config file
@@ -117,8 +120,8 @@ impl PlayerStatus {
             config.pause_before_playing_increment
         );
         println!(
-            "max_number_of_pings_to_a_remote_destinaton\t{}\r",
-            config.max_number_of_pings_to_a_remote_destinaton
+            "max_number_of_pings_to_a_remote_destination\t{}\r",
+            config.max_number_of_remote_pings
         );
 
         println!("scroll\t\t\t\t{:?}\r", config.scroll);
@@ -138,6 +141,10 @@ impl PlayerStatus {
     /// outputs whether or not the amplifier is muted & the status information
     pub fn output_debug_info(&self) {
         println!("\nstatus of rradio follows\r");
+        println!(
+            "Throttled_status\t{:?}\r",
+            lcd::get_throttled::is_throttled()
+        );
         println!("mute state is \t\t{}\r", get_mute_state::get_mute_state());
         println!("toml_error\t\t{:?}\r", self.toml_error);
         println!("running_status\t\t{:?}\r", self.running_status);
@@ -159,15 +166,21 @@ impl PlayerStatus {
 
         println!("position_and_duration follow if there are any\r");
         for channel_count in 0..self.position_and_duration.len() {
-            if self.position_and_duration[channel_count]
-                .duration_ms
-                .is_some()
+            if (!self.position_and_duration[channel_count]
+                .channel_data
+                .station_urls
+                .is_empty())
                 | (channel_count == self.channel_number)
             {
                 println!("channel_count {}\r", channel_count);
                 println!(
                     "\tindex_to_current_track\t{}\r",
                     self.position_and_duration[channel_count].index_to_current_track
+                );
+
+                println!(
+                    "\taddress_to_ping\t\t{}\r",
+                    self.position_and_duration[channel_count].address_to_ping
                 );
                 println!(
                     "\tposition\t\t{} s\r",
@@ -179,6 +192,7 @@ impl PlayerStatus {
                     "\tduration_ms\t\t{:?}\r",
                     self.position_and_duration[channel_count].duration_ms
                 );
+
                 println!(
                     "\tartist\t\t\t{}\r",
                     self.position_and_duration[channel_count].artist
@@ -202,6 +216,7 @@ impl PlayerStatus {
                         .channel_data
                         .last_track_is_a_ding
                 );
+
                 println!("\n\tTrack information follows\r");
 
                 for track_count in 0..self.position_and_duration[channel_count]

@@ -13,10 +13,10 @@ use gstreamer::prelude::ElementExtManual;
 use gstreamer_interfaces::PlaybinElement;
 use player_status::PlayerStatus;
 
-use std::task::Poll;
+use std::{process::Child, task::Poll};
 
 use crate::{
-    get_channel_details::get_channel_details_and_implement_them,
+    get_channel_details::store_channel_details_and_implement_them,
     lcd::get_local_ip_address,
     ping::{get_ping_time, see_if_there_is_a_ping_response},
     player_status::NUMBER_OF_POSSIBLE_CHANNELS,
@@ -109,7 +109,6 @@ async fn main() -> Result<(), String> {
         toml_error = Some(error);
         read_config::Config::default()
     });
-    //println!("conf {:?}\r", config);
     let mut status_of_rradio: PlayerStatus = PlayerStatus::new(&config);
     if let Some(toml_error_message) = toml_error {
         // if we got an error we should display it; hopefully, toml_error == none
@@ -194,52 +193,20 @@ async fn main() -> Result<(), String> {
             )
             .map(Event::Ticker);
 
-            let mut child = ping::send_ping(&mut status_of_rradio);
+            let mut child_ping: Child;
+            child = ping::send_ping(&mut status_of_rradio, &config);
 
             loop {
-                match status_of_rradio.ping_data.ping_status {
-                    ping::PingStatus::TimedOut => {
-                        println!("timed out\r");
-                        child = ping::send_ping(&mut status_of_rradio);
-                    }
-
-                    ping::PingStatus::PingResponseReceived => {
-                        //we must show the output
-                        let output = get_ping_time(child.wait_with_output(), &mut status_of_rradio);
-                        if status_of_rradio
-                            .ping_data
-                            .number_of_remote_pings_to_this_station
-                            <= config.max_number_of_pings_to_a_remote_destinaton
-                        {
-                            //status_of_rradio.ping_data.reached_number_of_remote_pings = false;
-                        } else {
-                            status_of_rradio.ping_data.reached_number_of_remote_pings = true;
-                            //status_of_rradio.ping_data.destination_to_ping = PingWhat::Local;
-                        }
-                        status_of_rradio.ping_data.toggle_ping_destination();
-
-                        match output {
-                            Ok(_ping_time) => {
-                                println!(
-                                    "{:?}  {} ms\r",
-                                    status_of_rradio.ping_data.destination_of_last_ping,
-                                    status_of_rradio.ping_data.ping_time
-                                );
-                            }
-                            Err(error) => {
-                                eprintln!("got ping error {error}\r")
-                            }
-                        }
-
-                        child = ping::send_ping(&mut status_of_rradio);
-                    }
-
-                    ping::PingStatus::PingSent => {
-                        see_if_there_is_a_ping_response(&mut child, &mut status_of_rradio);
-                    }
-                    ping::PingStatus::PingNotSent => {
-                        eprintln!("cannot get here\r")
-                    }
+                if status_of_rradio.ping_data.can_send_ping {
+                    //we must get the output
+                    if let Err(error) =
+                        get_ping_time(child_ping.wait_with_output(), &mut status_of_rradio)
+                    {
+                        eprintln!("Got ping error {error}\r")
+                    };
+                    child_ping = ping::send_ping(&mut status_of_rradio, &config);
+                } else {
+                    see_if_there_is_a_ping_response(&mut status_of_rradio);
                 }
 
                 let event = std::future::poll_fn(|cx| {
@@ -321,9 +288,7 @@ async fn main() -> Result<(), String> {
                         }
                         keyboard::Event::PreviousTrack => {
                             println!("PreviousTrack\r");
-                            status_of_rradio
-                                .ping_data
-                                .number_of_remote_pings_to_this_station = 0;
+                            status_of_rradio.ping_data.number_of_pings_to_this_channel = 0;
                             status_of_rradio.running_status = RunningStatus::RunningNormally; //at least hope this is true
                             status_of_rradio.position_and_duration
                                 [status_of_rradio.channel_number]
@@ -361,9 +326,7 @@ async fn main() -> Result<(), String> {
                             }
                         }
                         keyboard::Event::NextTrack => {
-                            status_of_rradio
-                                .ping_data
-                                .number_of_remote_pings_to_this_station = 0;
+                            status_of_rradio.ping_data.number_of_pings_to_this_channel = 0;
                             next_track(&mut status_of_rradio, &playbin);
                         }
                         keyboard::Event::PlayStation { channel_number } => {
@@ -380,43 +343,57 @@ async fn main() -> Result<(), String> {
                                 let previous_channel_number = status_of_rradio.channel_number;
                                 status_of_rradio.channel_number = channel_number;
 
-                                if let Err(the_error) = get_channel_details_and_implement_them(
-                                    &config,
-                                    &mut status_of_rradio,
-                                    &playbin,
-                                    previous_channel_number,
-                                ) {
-                                    if let ChannelErrorEvents::CouldNotFindChannelFile = the_error {
-                                        status_of_rradio.toml_error = None; // clear the TOML error out, the user must have seen it by now
-                                        status_of_rradio.running_status =
-                                            if previous_channel_number == channel_number {
-                                                RunningStatus::NoChannelRepeated
-                                            } else {
-                                                RunningStatus::NoChannel
-                                            };
-                                        if let Some(ding_filename) =
-                                            &config.aural_notifications.filename_error
-                                        {
-                                            // play a ding if one has been specified
-                                            status_of_rradio.position_and_duration
-                                                [status_of_rradio.channel_number]
-                                                .channel_data
-                                                .station_urls =
-                                                vec![format!("file://{ding_filename}")];
-                                            //status_of_rradio.index_to_current_track = 0;
-                                            let _ignore_error_if_beep_fails =
-                                                playbin.play_track(&status_of_rradio, false);
-                                            status_of_rradio.position_and_duration
-                                                [status_of_rradio.channel_number]
-                                                .index_to_current_track = 0;
+                                if let Err(the_channel_error_events) =
+                                    store_channel_details_and_implement_them(
+                                        &config,
+                                        &mut status_of_rradio,
+                                        &playbin,
+                                        previous_channel_number,
+                                    )
+                                {
+                                    match the_channel_error_events {
+                                        ChannelErrorEvents::CouldNotFindChannelFile => {
+                                            status_of_rradio.toml_error = None; // clear the TOML error out, the user must have seen it by now
+                                            status_of_rradio.running_status =
+                                                if previous_channel_number == channel_number {
+                                                    RunningStatus::NoChannelRepeated
+                                                } else {
+                                                    RunningStatus::NoChannel
+                                                };
+                                            if let Some(ding_filename) =
+                                                &config.aural_notifications.filename_error
+                                            {
+                                                // play a ding if one has been specified
+                                                status_of_rradio.position_and_duration
+                                                    [status_of_rradio.channel_number]
+                                                    .channel_data
+                                                    .station_urls =
+                                                    vec![format!("file://{ding_filename}")];
+                                                let _ignore_error_if_beep_fails =
+                                                    playbin.play_track(&status_of_rradio, false);
+                                                status_of_rradio.position_and_duration
+                                                    [status_of_rradio.channel_number]
+                                                    .index_to_current_track = 0;
+                                            }
                                         }
-                                    } else {
-                                        status_of_rradio
-                                            .all_4lines
-                                            .update_if_changed(the_error.to_lcd_screen().as_str());
-                                        status_of_rradio.running_status =
-                                            RunningStatus::LongMessageOnAll4Lines;
-                                    };
+                                        ChannelErrorEvents::CouldNotParseChannelFile {
+                                            channel_number,
+                                            error_message,
+                                        } => {
+                                            status_of_rradio.toml_error = Some(format!(
+                                                "Could not parse channel {channel_number}. {}",
+                                                error_message
+                                            ));
+                                        }
+
+                                        _ => {
+                                            status_of_rradio.all_4lines.update_if_changed(
+                                                the_channel_error_events.to_lcd_screen().as_str(),
+                                            );
+                                            status_of_rradio.running_status =
+                                                RunningStatus::LongMessageOnAll4Lines;
+                                        }
+                                    }
                                 }
                             }
                             if let Err(playbin_error_message) =
@@ -444,7 +421,6 @@ async fn main() -> Result<(), String> {
                     },
 
                     Some(Event::GStreamer(gstreamer_message)) => {
-                        // println!("got gstreamer message{:?}\r", gstreamer_message);
                         use gstreamer::MessageView;
                         // let yy = gstreamer_message.view();
                         // println!("yy{:?}\r", yy);
@@ -585,12 +561,12 @@ async fn main() -> Result<(), String> {
                             .source_type
                             == SourceType::UrlList
                         {
-                            3
+                            3 // we need space to display the buffer
                         } else {
-                            0
+                            0 // we do not need space as it is not a URL list
                         }
                     } else {
-                        0
+                        0 // we do not need space
                     };
 
                 status_of_rradio.line_34_data.update_scroll(
