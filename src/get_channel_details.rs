@@ -5,7 +5,11 @@
 use std::{fs, os::fd::AsRawFd};
 use substring::Substring;
 
-use crate::{gstreamer_interfaces::PlaybinElement, lcd, player_status::PlayerStatus};
+use crate::{
+    gstreamer_interfaces::PlaybinElement,
+    lcd,
+    player_status::{PlayerStatus, START_UP_DING_CHANNEL_NUMBER},
+};
 pub mod cd_functions;
 mod mount_ext;
 
@@ -491,6 +495,12 @@ pub fn store_channel_details_and_implement_them(
                 if let Some(position_first_single_slash) = address_to_ping.find('/') {
                     let _suffix = address_to_ping.split_off(position_first_single_slash);
                 } // else there was no suffix so do nothing;
+
+                // but there might be a port number that we have to remove too
+                if let Some(position_of_colon) = address_to_ping.find(':') {
+                    let _ = address_to_ping.split_off(position_of_colon);
+                    
+                }
                 status_of_rradio.position_and_duration[status_of_rradio.channel_number]
                     .address_to_ping = address_to_ping;
             }
@@ -511,17 +521,16 @@ pub fn store_channel_details_and_implement_them(
                 } else {
                     status_of_rradio.running_status = lcd::RunningStatus::NoChannel;
                 }
-                //status_of_rradio.running_status = lcd::RunningStatus::NoChannel;
-
                 if let Some(ding_filename) = &config.aural_notifications.filename_error {
                     // play a ding if one has been specified
-                    status_of_rradio.position_and_duration[status_of_rradio.channel_number]
+                    status_of_rradio.position_and_duration[START_UP_DING_CHANNEL_NUMBER]
                         .channel_data
                         .station_urls = vec![format!("file://{ding_filename}")];
-                    status_of_rradio.position_and_duration[status_of_rradio.channel_number]
+                    status_of_rradio.position_and_duration[START_UP_DING_CHANNEL_NUMBER]
                         .index_to_current_track = 0;
-                    let _ignore_error_if_beep_fails = playbin.play_track(&status_of_rradio, false);
-                    status_of_rradio.position_and_duration[status_of_rradio.channel_number]
+                    let _ignore_error_if_beep_fails =
+                        playbin.play_track(&status_of_rradio, &config.aural_notifications, false);
+                    status_of_rradio.position_and_duration[START_UP_DING_CHANNEL_NUMBER]
                         .index_to_current_track = 0;
                 }
             } else {

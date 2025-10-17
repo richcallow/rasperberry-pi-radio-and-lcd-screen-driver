@@ -1,4 +1,4 @@
-use crate::{get_channel_details::{SourceType}, player_status::{self}};
+use crate::{get_channel_details::SourceType, lcd::RunningStatus, player_status::{self}};
 use glib::object::{Cast, ObjectExt};
 use gstreamer::{glib, prelude::{ElementExt, ElementExtManual}, SeekFlags};
 use gstreamer_audio::prelude::StreamVolumeExt;
@@ -117,32 +117,47 @@ impl PlaybinElement {
     /// Plays the first track aka station specified by player_status
     /// seeks to the previous position if the media is seekable 
     /// If it fails the error message is returned as an Err(String)
-    pub fn play_track(&self, status_of_rradio: &player_status::PlayerStatus, seek_wanted_if_possible: bool) -> Result<(), String> {
+    pub fn play_track(&self, status_of_rradio: &player_status::PlayerStatus, 
+        aural_notifications: &crate::read_config::AuralNotifications,   seek_wanted_if_possible: bool) -> Result<(), String> {
         match self.playbin_element
             .set_state(gstreamer::State::Null)      // we need to set it to null before we can change the station 
         {
         Ok(_state_change_success) => {          
-            if (status_of_rradio.channel_number == player_status::START_UP_DING_CHANNEL_NUMER) && 
-                (status_of_rradio.position_and_duration[player_status::NUMBER_OF_POSSIBLE_CHANNELS].channel_data.station_urls.is_empty()) {
+            match status_of_rradio.running_status {
+                RunningStatus::NoChannel | RunningStatus::NoChannelRepeated | RunningStatus::LongMessageOnAll4Lines  =>{
+                    if aural_notifications.filename_error.is_none() {return  Ok(())}
+                },  // return without playing as we ought to play a ding, but one has not been specified
+                _ => {}
+            }
+            
+            if (status_of_rradio.channel_number == player_status::START_UP_DING_CHANNEL_NUMBER) && 
+                (status_of_rradio.position_and_duration[player_status::START_UP_DING_CHANNEL_NUMBER].channel_data.station_urls.is_empty()) {
                 return Ok(())
             }
+                let mut index_to_current_track = status_of_rradio.position_and_duration[status_of_rradio.channel_number].index_to_current_track;
+                let channel_number = match status_of_rradio.running_status{
+                        RunningStatus::NoChannel | RunningStatus::NoChannelRepeated | RunningStatus::LongMessageOnAll4Lines =>{ 
+                            index_to_current_track = 0; //there is only one track
+                            player_status::START_UP_DING_CHANNEL_NUMBER},
+                        _ => status_of_rradio.channel_number
+                };
 
-            if status_of_rradio.position_and_duration[status_of_rradio.channel_number].index_to_current_track >= 
-                    status_of_rradio.position_and_duration[status_of_rradio.channel_number].channel_data.station_urls.len(){
+            if status_of_rradio.position_and_duration[channel_number].index_to_current_track >= 
+                    status_of_rradio.position_and_duration[channel_number].channel_data.station_urls.len(){
                     // as index_to_current_track is a usize, there is no need to check it it is not negative
                    eprintln!("On channel {} Index to tracks out of bounds; it is {} and the list has {} elements\r", 
-                   status_of_rradio.channel_number,
-                   status_of_rradio.position_and_duration[status_of_rradio.channel_number].index_to_current_track, status_of_rradio.position_and_duration[status_of_rradio.channel_number].channel_data.station_urls.len());
+                   channel_number,
+                   status_of_rradio.position_and_duration[channel_number].index_to_current_track, 
+                        status_of_rradio.position_and_duration[channel_number].channel_data.station_urls.len());
                    return  Err(format!("On channel {} Index to tracks out of bounds; it is {} and the list has {} elements", 
-                   status_of_rradio.channel_number, status_of_rradio.position_and_duration[status_of_rradio.channel_number].index_to_current_track, 
-                        status_of_rradio.position_and_duration[status_of_rradio.channel_number].channel_data.station_urls.len()));
+                   channel_number, index_to_current_track, 
+                        status_of_rradio.position_and_duration[channel_number].channel_data.station_urls.len()));
                 }
 
-                let index_to_current_track = status_of_rradio.position_and_duration[status_of_rradio.channel_number].index_to_current_track;
                 self.playbin_element.set_property(
                     "uri",              
-                    // if "uri" does not exist, it panics, but that does not seem to be anything that can be done about it.
-                    &status_of_rradio.position_and_duration[status_of_rradio.channel_number].channel_data.station_urls[index_to_current_track],
+                   // if "uri" does not exist, it panics, but that does not seem to be anything that can be done about it.
+                    &status_of_rradio.position_and_duration[channel_number].channel_data.station_urls[index_to_current_track],
                 );
 
                 match self.playbin_element //clone here makes it stop working

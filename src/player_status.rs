@@ -39,7 +39,7 @@ impl RealTimeDataOnOneChannel {
 
 /// The maximum possible as the channel number is 2 decimal digits. (The ding channel 100, so the user cannot enter it.)
 pub const NUMBER_OF_POSSIBLE_CHANNELS: usize = 100;
-pub const START_UP_DING_CHANNEL_NUMER: usize = NUMBER_OF_POSSIBLE_CHANNELS;
+pub const START_UP_DING_CHANNEL_NUMBER: usize = NUMBER_OF_POSSIBLE_CHANNELS;
 #[derive(Debug)] // neither Copy nor clone are implmented as the player can only have a single status
 /// A struct listing all information needed to dispaly the status of rradio.
 pub struct PlayerStatus {
@@ -74,7 +74,7 @@ impl PlayerStatus {
         PlayerStatus {
             toml_error: None,
             running_status: lcd::RunningStatus::Startingup,
-            channel_number: NUMBER_OF_POSSIBLE_CHANNELS + 1, // an invalid value that cannot match as must be in the range 0 to 100 inclusive (Ding channel is 100)
+            channel_number: NUMBER_OF_POSSIBLE_CHANNELS,
             position_and_duration: std::array::from_fn(|_index| RealTimeDataOnOneChannel::new()),
             all_4lines: lcd::ScrollData::new("", 4),
             line_1_data: lcd::ScrollData::new("", 1),
@@ -93,12 +93,15 @@ impl PlayerStatus {
     pub fn initialise_for_new_station(&mut self) -> () {
         self.time_started_playing_current_station = chrono::Utc::now();
         self.running_status = RunningStatus::RunningNormally;
-        self.ping_data.number_of_pings_to_this_channel = 0; 
+        self.ping_data.number_of_pings_to_this_channel = 0;
     }
 
     /// outputs the config file
     pub fn output_config_information(&self, config: &Config) {
-        println!("aural_notifications\t\t{:?}\r", config.aural_notifications);
+        println!(
+            "\r\nconfigdata\r\naural_notifications\t\t{:?}\r",
+            config.aural_notifications
+        );
         println!("buffering_duration\t\t{:?}\r", config.buffering_duration);
         println!("cd_channel_number\t\t{:?}\r", config.cd_channel_number);
         println!(

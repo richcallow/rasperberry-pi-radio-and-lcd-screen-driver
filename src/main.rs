@@ -23,6 +23,7 @@ use crate::{
 use lcd::{RunningStatus, ScrollData, TextBuffer};
 
 mod get_channel_details;
+mod get_config_file_path;
 mod gstreamer_interfaces;
 mod keyboard;
 mod lcd;
@@ -77,37 +78,22 @@ async fn main() -> Result<(), String> {
             ));
         }
     }
-
-    let mut config_file_path_from_args = String::from("config2.toml"); // the default value if not specified
-    let config_file_path = {
-        let mut args = std::env::args().skip(1); //skip the name of the first executable
-        while let Some(arg) = args.next() {
-            match arg.as_str() {
-                "-c" | "--config" => {
-                    config_file_path_from_args = args.next().ok_or("the format is -c followed by the file name, but could not find the file name.")?;
-                }
-                "-V" | "--version" => {
-                    println!("{} v{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
-                    return Ok(());
-                }
-                _ => {
-                    let error_message = format!("Unhandled argument  {arg:?}. Valid arguments are -c then the config file name OR -V");
-
-                    let mut text_buffer = TextBuffer::new();
-                    text_buffer.write_text_to_lines(error_message.bytes(), lcd::LineNum::Line1, 4);
-                    lcd.write_text_buffer_to_lcd(&text_buffer);
-                    return Err(error_message);
-                }
-            }
+    let mut config_file_path = "config2.toml".to_string(); // the default path to the config TOML file
+    match get_config_file_path::get_config_file_path(&config_file_path) {
+        Ok(new_path) => config_file_path = new_path,
+        Err(error_message) => {
+            let mut text_buffer = TextBuffer::new();
+            text_buffer.write_text_to_lines(error_message.bytes(), lcd::LineNum::Line1, 4);
+            lcd.write_text_buffer_to_lcd(&text_buffer);
         }
-        config_file_path_from_args
-    };
+    }
 
     let mut toml_error: Option<String> = None; // a temporary store of the master store; we need a temporary store as we cannot create status_of_rradio until we have read the config file
     let config = read_config::Config::from_file(&config_file_path).unwrap_or_else(|error| {
         toml_error = Some(error);
         read_config::Config::default()
     });
+
     let mut status_of_rradio: PlayerStatus = PlayerStatus::new(&config);
     if let Some(toml_error_message) = toml_error {
         // if we got an error we should display it; hopefully, toml_error == none
@@ -131,7 +117,7 @@ async fn main() -> Result<(), String> {
             }
         };
     }
-    
+
     if gstreamer::init().is_err() {
         status_of_rradio.all_4lines = ScrollData::new("Failed it to intialise gstreamer", 4);
         status_of_rradio.running_status = lcd::RunningStatus::LongMessageOnAll4Lines;
@@ -154,17 +140,19 @@ async fn main() -> Result<(), String> {
 
             // if Some(filename) can match config.aural_notifications.filename_startup then execute the block
             if let Some(filename) = config.aural_notifications.filename_startup.clone() {
-                status_of_rradio.channel_number = player_status::START_UP_DING_CHANNEL_NUMER;
+                status_of_rradio.channel_number = player_status::START_UP_DING_CHANNEL_NUMBER;
 
                 status_of_rradio.position_and_duration
-                    [player_status::START_UP_DING_CHANNEL_NUMER]
+                    [player_status::START_UP_DING_CHANNEL_NUMBER]
                     .channel_data
                     .station_urls = vec![format!("file://{filename}")];
                 status_of_rradio.position_and_duration
-                    [player_status::START_UP_DING_CHANNEL_NUMER]
+                    [player_status::START_UP_DING_CHANNEL_NUMBER]
                     .channel_data
                     .source_type = SourceType::UrlList;
-                if let Err(error_message) = playbin.play_track(&status_of_rradio, false) {
+                if let Err(error_message) =
+                    playbin.play_track(&status_of_rradio, &config.aural_notifications, false)
+                {
                     status_of_rradio.all_4lines = ScrollData::new(error_message.as_str(), 4);
                     lcd.write_rradio_status_to_lcd(&status_of_rradio, &config);
                 }
@@ -303,9 +291,11 @@ async fn main() -> Result<(), String> {
                                     .channel_data
                                     .station_urls
                                     .len(); // % is a remainder operator not modulo
-                            if let Err(playbin_error_message) =
-                                playbin.play_track(&status_of_rradio, false)
-                            {
+                            if let Err(playbin_error_message) = playbin.play_track(
+                                &status_of_rradio,
+                                &config.aural_notifications,
+                                false,
+                            ) {
                                 status_of_rradio.all_4lines.update_if_changed(
                                     format!("When wanting to play the previous track got {playbin_error_message}")
                                         .as_str(),
@@ -324,7 +314,7 @@ async fn main() -> Result<(), String> {
                         }
                         keyboard::Event::NextTrack => {
                             status_of_rradio.ping_data.number_of_pings_to_this_channel = 0;
-                            next_track(&mut status_of_rradio, &playbin);
+                            next_track(&mut status_of_rradio, &playbin, &config);
                         }
                         keyboard::Event::PlayStation { channel_number } => {
                             status_of_rradio.initialise_for_new_station();
@@ -362,14 +352,18 @@ async fn main() -> Result<(), String> {
                                             {
                                                 // play a ding if one has been specified
                                                 status_of_rradio.position_and_duration
-                                                    [status_of_rradio.channel_number]
+                                                    [player_status::START_UP_DING_CHANNEL_NUMBER]
                                                     .channel_data
                                                     .station_urls =
                                                     vec![format!("file://{ding_filename}")];
-                                                let _ignore_error_if_beep_fails =
-                                                    playbin.play_track(&status_of_rradio, false);
+                                                let _ignore_error_if_beep_fails = playbin
+                                                    .play_track(
+                                                        &status_of_rradio,
+                                                        &config.aural_notifications,
+                                                        false,
+                                                    );
                                                 status_of_rradio.position_and_duration
-                                                    [status_of_rradio.channel_number]
+                                                    [player_status::START_UP_DING_CHANNEL_NUMBER]
                                                     .index_to_current_track = 0;
                                             }
                                         }
@@ -393,9 +387,12 @@ async fn main() -> Result<(), String> {
                                     }
                                 }
                             }
-                            if let Err(playbin_error_message) =
-                                playbin.play_track(&status_of_rradio, true)
-                            {
+
+                            if let Err(playbin_error_message) = playbin.play_track(
+                                &status_of_rradio,
+                                &config.aural_notifications,
+                                true,
+                            ) {
                                 status_of_rradio.all_4lines.update_if_changed(
                                     format!("When playing a track on channel {} got {playbin_error_message}", status_of_rradio.channel_number)
                                         .as_str());
@@ -503,7 +500,7 @@ async fn main() -> Result<(), String> {
                                     .len()
                                     > 1
                                 {
-                                    next_track(&mut status_of_rradio, &playbin);
+                                    next_track(&mut status_of_rradio, &playbin, &config);
                                 }
                             }
 
@@ -640,20 +637,7 @@ fn generate_line2(status_of_rradio: &PlayerStatus) -> String {
             .channel_data
             .organisation
             .to_string(),
-        _ => {
-            println!(
-                "got source type {:?}\r",
-                status_of_rradio.position_and_duration[status_of_rradio.channel_number]
-                    .channel_data
-                    .source_type
-            );
-            format!(
-                "Unexpected source type {:?}",
-                status_of_rradio.position_and_duration[status_of_rradio.channel_number]
-                    .channel_data
-                    .source_type,
-            )
-        }
+        SourceType::UnknownSourceType => "Unnown source type".to_string(),
     };
     let throttled_status = lcd::get_throttled::is_throttled();
     if throttled_status.pi_is_throttled {
@@ -663,7 +647,11 @@ fn generate_line2(status_of_rradio: &PlayerStatus) -> String {
 }
 
 /// Plays the next track by modulo incrementing status_of_rradio.index_to_current_track
-fn next_track(status_of_rradio: &mut PlayerStatus, playbin: &PlaybinElement) {
+fn next_track(
+    status_of_rradio: &mut PlayerStatus,
+    playbin: &PlaybinElement,
+    config: &crate::read_config::Config,
+) {
     status_of_rradio.running_status = RunningStatus::RunningNormally; // at least hope that this is true
     status_of_rradio.position_and_duration[status_of_rradio.channel_number]
         .index_to_current_track = (status_of_rradio.position_and_duration
@@ -674,7 +662,9 @@ fn next_track(status_of_rradio: &mut PlayerStatus, playbin: &PlaybinElement) {
             .channel_data
             .station_urls
             .len();
-    if let Err(playbin_error_message) = playbin.play_track(status_of_rradio, false) {
+    if let Err(playbin_error_message) =
+        playbin.play_track(status_of_rradio, &config.aural_notifications, false)
+    {
         status_of_rradio.all_4lines.update_if_changed(
             format!(
                 "When wanting to play the next track playing a track got {playbin_error_message}"

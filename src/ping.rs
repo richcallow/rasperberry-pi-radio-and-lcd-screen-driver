@@ -38,8 +38,7 @@ impl PingWhere {
         match self {
             PingWhere::Local => "LocPing".to_string(),
             PingWhere::Remote => "RemPing".to_string(),
-            PingWhere::Nothing => {               
-                "No dest".to_string()},
+            PingWhere::Nothing => "No dest".to_string(),
         }
     }
     /// converts to a single character, when space is very much at a premium
@@ -86,8 +85,6 @@ pub fn send_ping(
     status_of_rradio: &mut player_status::PlayerStatus,
     config: &crate::read_config::Config,
 ) -> std::process::Child {
-   
-    
     status_of_rradio.ping_data.last_ping_time_of_day = chrono::Utc::now();
 
     let number_of_remote_pings_to_this_channel =
