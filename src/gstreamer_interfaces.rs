@@ -94,7 +94,7 @@ impl PlaybinElement {
             if let Ok(duration_as_nanos) = i64::try_from(buffering_duration.as_nanos()) {
                 playbin_element.set_property("buffer-duration", duration_as_nanos);
             } else {
-                eprintln!("Failed to set the buffer duration")
+                eprintln!("Failed to set the buffer duration\r")
             }
         }
 
@@ -115,7 +115,8 @@ impl PlaybinElement {
     }
 
     /// Plays the first track aka station specified by player_status
-    /// seeks to the previous position if the media is seekable 
+    /// seeks to the previous position if the media is seekable
+    /// if status is channel not found, it plays a ding, if one has been specified 
     /// If it fails the error message is returned as an Err(String)
     pub fn play_track(&self, status_of_rradio: &player_status::PlayerStatus, 
         aural_notifications: &crate::read_config::AuralNotifications,   seek_wanted_if_possible: bool) -> Result<(), String> {
@@ -159,6 +160,11 @@ impl PlaybinElement {
                    // if "uri" does not exist, it panics, but that does not seem to be anything that can be done about it.
                     &status_of_rradio.position_and_duration[channel_number].channel_data.station_urls[index_to_current_track],
                 );
+
+                self.playbin_element.set_state(gstreamer::State::Paused);
+               use std::time::Duration;
+                std::thread::sleep(Duration::from_millis(5));
+ 
 
                 match self.playbin_element //clone here makes it stop working
                     .set_state(gstreamer::State::Playing)

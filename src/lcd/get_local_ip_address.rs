@@ -69,9 +69,8 @@ pub fn try_once_to_get_wifi_network_data() -> Result<NetworkData, String> {
                     is_valid: true,
                 })
             } else {
-                use std::thread::sleep;
                 use std::time::Duration;
-                sleep(Duration::from_millis(50)); //sleep for a little time so if this subroutine is called again at one, it does not hog the CPU
+                std::thread::sleep(Duration::from_millis(50)); //sleep for a little time so if this subroutine is called again at one, it does not hog the CPU
                 Err(format!("not connected; got {}", output_as_ascii))
             }
         }

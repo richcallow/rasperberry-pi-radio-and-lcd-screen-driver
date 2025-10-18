@@ -89,7 +89,8 @@ impl PlayerStatus {
             time_started_playing_current_station: chrono::Utc::now(),
         }
     }
-    /// initialises for a new station, not for a new track; amongst other things sets RunningStatus::RunningNormally
+    /// initialises for a new station, sets time_started_playing_current_station, RunningStatus::RunningNormally,
+    /// number_of_pings_to_this_channel = 0
     pub fn initialise_for_new_station(&mut self) -> () {
         self.time_started_playing_current_station = chrono::Utc::now();
         self.running_status = RunningStatus::RunningNormally;
@@ -104,13 +105,13 @@ impl PlayerStatus {
         );
         println!("buffering_duration\t\t{:?}\r", config.buffering_duration);
         println!("cd_channel_number\t\t{:?}\r", config.cd_channel_number);
-        println!(
+        /*println!(
             "error_recovery_attempt_count_reset_time\t{:?}\r",
             config.error_recovery_attempt_count_reset_time
-        );
+        );*/
         println!("initial_volume\t\t\t{}\r", config.initial_volume);
         println!("input_timeout\t\t\t{:?}\r", config.input_timeout);
-        println!(
+        /*println!(
             "max_pause_before_playing\t{:?}\r",
             config.max_pause_before_playing
         );
@@ -121,7 +122,7 @@ impl PlayerStatus {
         println!(
             "pause_before_playing_increment\t\t{:?}\r",
             config.pause_before_playing_increment
-        );
+        );*/
         println!(
             "max_number_of_pings_to_a_remote_destination\t{}\r",
             config.max_number_of_remote_pings
@@ -129,8 +130,8 @@ impl PlayerStatus {
 
         println!("scroll\t\t\t\t{:?}\r", config.scroll);
         println!(
-            "smart_goto_previous_track_duration\t{:?}\r",
-            config.smart_goto_previous_track_duration
+            "goto_previous_track_time_delta\t{:?}\r",
+            config.goto_previous_track_time_delta
         );
         println!("stations_directory\t\t{}\r", config.stations_directory);
         println!(

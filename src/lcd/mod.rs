@@ -672,7 +672,7 @@ impl Lc {
             match ping_time_in_ms {
                 f32::MIN..0.0 => "NegTime".to_string(),
 
-                0.0..99.9999999 => {
+                0.0.. => {
                     format!("{}{:.width$}ms", destination, ping_time_in_ms, width = 1)
                 }
                 _ => {
@@ -796,7 +796,6 @@ impl Lc {
 
     /// returns the volume as a String if playing, if not the gstreamer state as a String
     pub fn get_vol_string(status_of_rradio: &player_status::PlayerStatus) -> String {
-        //if status_of_rradio.gstreamer_state == gstreamer::State::Playing {
         match status_of_rradio.gstreamer_state {
             gstreamer::State::Playing | gstreamer::State::Null => {
                 let number_of_digits = match status_of_rradio.current_volume {

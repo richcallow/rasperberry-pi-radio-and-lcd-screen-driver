@@ -21,20 +21,14 @@ pub struct Config {
     #[serde(with = "humantime_serde")]
     pub buffering_duration: Option<Duration>,
 
-    #[serde(with = "humantime_serde")]
-    pub pause_before_playing_increment: Duration,
+    //#[serde(with = "humantime_serde")]
+    // pub pause_before_playing_increment: Duration,
+    pub goto_previous_track_time_delta: i64,
 
-    #[serde(with = "humantime_serde")]
-    pub max_pause_before_playing: Duration,
+    //pub maximum_error_recovery_attempts: usize,
 
-    #[serde(with = "humantime_serde")]
-    pub smart_goto_previous_track_duration: Duration,
-
-    pub maximum_error_recovery_attempts: usize,
-
-    #[serde(with = "humantime_serde")]
-    pub error_recovery_attempt_count_reset_time: Option<Duration>,
-
+    //#[serde(with = "humantime_serde")]
+    //pub error_recovery_attempt_count_reset_time: Option<Duration>,
     pub time_initial_message_displayed_after_channel_change_as_ms: i64,
 
     pub max_number_of_remote_pings: u32,
@@ -93,11 +87,11 @@ impl Default for Config {
             volume_offset: 5,   // step the volum in 5 dB intervals
             initial_volume: 70, // initial volume is 70 dB
             buffering_duration: None,
-            pause_before_playing_increment: Duration::from_secs(1),
-            max_pause_before_playing: Duration::from_secs(5),
-            smart_goto_previous_track_duration: Duration::from_secs(2),
-            maximum_error_recovery_attempts: 5,
-            error_recovery_attempt_count_reset_time: Some(Duration::from_secs(30)),
+            //pause_before_playing_increment: Duration::from_secs(1),
+            //max_pause_before_playing: Duration::from_secs(5),
+            goto_previous_track_time_delta: 2000,
+            //maximum_error_recovery_attempts: 5,
+            //error_recovery_attempt_count_reset_time: Some(Duration::from_secs(30)),
             time_initial_message_displayed_after_channel_change_as_ms: 3000,
             scroll: Scroll {
                 max_scroll: 14,
@@ -180,10 +174,15 @@ input_timeout = "3s"            # input timeout on the keyboard
 volume_offset = 5               # the ammount the volume changes when going up & down
 initial_volume = 75
 buffering_duration = "20s"
-pause_before_playing_increment = "1s"           # the increment in the pauses before playing when an infinite stream terminates
-max_pause_before_playing  = "10s"                       # maximum value of the pause
+#pause_before_playing_increment = "1s"          # the increment in the pauses before playing when an infinite stream terminates
+#max_pause_before_playing  = "10s"                      # maximum value of the pause
 
-smart_goto_previous_track_duration = "4s"
+smart_goto_previous_track_duration = 3000
+
+cd_channel_number = 0
+
+max_number_of_remote_pings = 12
+
 
 [scroll]
 max_scroll = 14         #  maximum ammount of a scroll in charactters
@@ -193,9 +192,6 @@ scroll_period_ms = 1600 # the time between scrollsin misli-seconds
 
 [log_level]
 "rradio::audio_pipeline::controller::buffering" = "trace"
-
-[ping]
-remote_ping_count = 20                                  # number of times the remote server is pinged
 
 [aural_notifications]
 filename_startup =  "/boot/sounds/KDE-Sys-App-Message.mp3"                      # sound played at startup
@@ -209,5 +205,7 @@ cd_channel_number = 0
 channel_number = 99
 device = "/dev/sda1"
 mount_folder = "//home//pi//mount_folder"
+
+
 
 */

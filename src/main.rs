@@ -7,8 +7,7 @@ compile_error!("You must compile this on linux");
 use chrono::TimeDelta;
 use futures_util::StreamExt;
 use get_channel_details::{ChannelErrorEvents, SourceType};
-
-use gstreamer::prelude::ElementExtManual;
+use gstreamer::{prelude::ElementExtManual, SeekFlags};
 use gstreamer_interfaces::PlaybinElement;
 use player_status::PlayerStatus;
 
@@ -273,43 +272,55 @@ async fn main() -> Result<(), String> {
                         }
                         keyboard::Event::PreviousTrack => {
                             println!("PreviousTrack\r");
-                            status_of_rradio.ping_data.number_of_pings_to_this_channel = 0;
-                            status_of_rradio.running_status = RunningStatus::RunningNormally; //at least hope this is true
-                            status_of_rradio.position_and_duration
+                            status_of_rradio.initialise_for_new_station();
+                            if status_of_rradio.position_and_duration
                                 [status_of_rradio.channel_number]
-                                .index_to_current_track = (status_of_rradio.position_and_duration
-                                [status_of_rradio.channel_number]
-                                .index_to_current_track
-                                + status_of_rradio.position_and_duration
+                                .position
+                                > TimeDelta::milliseconds(config.goto_previous_track_time_delta)
+                            {
+                                let _ = playbin.playbin_element.seek_simple(
+                                    SeekFlags::FLUSH
+                                        | SeekFlags::KEY_UNIT
+                                        | SeekFlags::SNAP_NEAREST,
+                                    gstreamer::ClockTime::from_seconds(0),
+                                );
+                            } else {
+                                status_of_rradio.position_and_duration
                                     [status_of_rradio.channel_number]
-                                    .channel_data
-                                    .station_urls
-                                    .len()
-                                - 1)
-                                % status_of_rradio.position_and_duration
-                                    [status_of_rradio.channel_number]
-                                    .channel_data
-                                    .station_urls
-                                    .len(); // % is a remainder operator not modulo
-                            if let Err(playbin_error_message) = playbin.play_track(
-                                &status_of_rradio,
-                                &config.aural_notifications,
-                                false,
-                            ) {
-                                status_of_rradio.all_4lines.update_if_changed(
+                                    .index_to_current_track = (status_of_rradio
+                                    .position_and_duration[status_of_rradio.channel_number]
+                                    .index_to_current_track
+                                    + status_of_rradio.position_and_duration
+                                        [status_of_rradio.channel_number]
+                                        .channel_data
+                                        .station_urls
+                                        .len()
+                                    - 1)
+                                    % status_of_rradio.position_and_duration
+                                        [status_of_rradio.channel_number]
+                                        .channel_data
+                                        .station_urls
+                                        .len(); // % is a remainder operator not modulo
+                                if let Err(playbin_error_message) = playbin.play_track(
+                                    &status_of_rradio,
+                                    &config.aural_notifications,
+                                    false,
+                                ) {
+                                    status_of_rradio.all_4lines.update_if_changed(
                                     format!("When wanting to play the previous track got {playbin_error_message}")
                                         .as_str(),
                                 );
-                                status_of_rradio.running_status =
-                                    RunningStatus::LongMessageOnAll4Lines;
-                            } else {
-                                status_of_rradio.line_2_data.update_if_changed(
-                                    status_of_rradio.position_and_duration
-                                        [status_of_rradio.channel_number]
-                                        .channel_data
-                                        .organisation
-                                        .as_str(),
-                                );
+                                    status_of_rradio.running_status =
+                                        RunningStatus::LongMessageOnAll4Lines;
+                                } else {
+                                    status_of_rradio.line_2_data.update_if_changed(
+                                        status_of_rradio.position_and_duration
+                                            [status_of_rradio.channel_number]
+                                            .channel_data
+                                            .organisation
+                                            .as_str(),
+                                    );
+                                }
                             }
                         }
                         keyboard::Event::NextTrack => {
@@ -586,7 +597,7 @@ async fn main() -> Result<(), String> {
 }
 
 /// Generates the text for line 2 for the nornmal running case, ie streaming, USB or CD. Adds the throttled state if the Pi is throttled
-fn generate_line2(status_of_rradio: &PlayerStatus) -> String {
+pub fn generate_line2(status_of_rradio: &PlayerStatus) -> String {
     let mut line2 = match status_of_rradio.position_and_duration[status_of_rradio.channel_number]
         .channel_data
         .source_type
@@ -605,7 +616,9 @@ fn generate_line2(status_of_rradio: &PlayerStatus) -> String {
             }
             format!(
                 "CD track {} of {}",
-                status_of_rradio.channel_number + 1, // +1 as humans start counting at 1, not zero
+                status_of_rradio.position_and_duration[status_of_rradio.channel_number]
+                    .index_to_current_track
+                    + 1, // +1 as humans start counting at 1, not zero
                 num_tracks
             )
         }
