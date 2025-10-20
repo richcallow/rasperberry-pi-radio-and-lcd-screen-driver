@@ -2,6 +2,8 @@ use crate::{get_channel_details::SourceType, lcd::RunningStatus, player_status::
 use glib::object::{Cast, ObjectExt};
 use gstreamer::{glib, prelude::{ElementExt, ElementExtManual}, SeekFlags};
 use gstreamer_audio::prelude::StreamVolumeExt;
+use crate::lcd::{LineNum, TextBuffer};
+
 /// The normal maximum for gstreamer that will not overload
 pub const VOLUME_ZERO_DB: i32 = 100;
 /// The lowest possible gstreamer volume
@@ -119,7 +121,7 @@ impl PlaybinElement {
     /// if status is channel not found, it plays a ding, if one has been specified 
     /// If it fails the error message is returned as an Err(String)
     pub fn play_track(&self, status_of_rradio: &player_status::PlayerStatus, 
-        aural_notifications: &crate::read_config::AuralNotifications,   seek_wanted_if_possible: bool) -> Result<(), String> {
+        aural_notifications: &crate::read_config::AuralNotifications, lcd: &mut crate::lcd::Lc,  seek_wanted_if_possible: bool) -> Result<(), String> {
         match self.playbin_element
             .set_state(gstreamer::State::Null)      // we need to set it to null before we can change the station 
         {
@@ -161,10 +163,18 @@ impl PlaybinElement {
                     &status_of_rradio.position_and_duration[channel_number].channel_data.station_urls[index_to_current_track],
                 );
 
-                self.playbin_element.set_state(gstreamer::State::Paused);
-               use std::time::Duration;
-                std::thread::sleep(Duration::from_millis(5));
- 
+               if let Some(pause_before_playing_ms) = 
+                    status_of_rradio.position_and_duration[status_of_rradio.channel_number].channel_data .pause_before_playing_ms {             
+                    if  self.playbin_element.set_state(gstreamer::State::Paused).is_err(){
+                        eprintln!("gsteamer pause failed\r"); // if it fails, there is not much we can do about it; but at least the message might be seen
+                    }
+
+                    let mut text_buffer = TextBuffer::new();
+                    text_buffer.write_text_to_lines("Filling buffer".bytes(), LineNum::Line1, 1);
+                    text_buffer.write_text_to_lines(format! ("for channel {}", status_of_rradio.channel_number).bytes(), LineNum::Line2, 3);
+                    lcd.write_text_buffer_to_lcd(&text_buffer);
+                    std::thread::sleep( std::time::Duration::from_millis(pause_before_playing_ms));                
+               }
 
                 match self.playbin_element //clone here makes it stop working
                     .set_state(gstreamer::State::Playing)

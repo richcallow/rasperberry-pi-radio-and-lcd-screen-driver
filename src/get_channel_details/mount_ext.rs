@@ -14,6 +14,9 @@ pub fn mount(
     if status_of_rradio.usb_is_mounted {
         Ok(()) // it is already mounted, so no need to do anything.
     } else {
+        
+        //mount -t cifs "//192.1????" mount/ -o user=????,pass=????,vers=1.0
+
         let mount_result_as_result = sys_mount::Mount::builder()
             .fstype("vfat")
             .flags(sys_mount::MountFlags::RDONLY | sys_mount::MountFlags::NOATIME)

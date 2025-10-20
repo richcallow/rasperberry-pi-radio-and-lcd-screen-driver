@@ -93,7 +93,7 @@ impl std::fmt::Debug for LcdScreenEncodedText {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 /// Holds the text, and information on how to display it, namely the scroll position,
 /// the number of lines & the time the text was last scrolled.
 pub struct ScrollData {
@@ -469,11 +469,11 @@ impl Lc {
                 .write_text_to_single_line(status_of_rradio.line_1_data.bytes(), LineNum::Line1);
         }
 
-        
-        let ping_message =
-            if status_of_rradio.ping_data.number_of_pings_to_this_channel>1 {
-            Lc::format_ping_time(&status_of_rradio.ping_data.ping_time_and_destination, true)}
-            else {"".to_string()}; // it is too early to have got a response so shown nothing
+        let ping_message = if status_of_rradio.ping_data.number_of_pings_to_this_channel > 1 {
+            Lc::format_ping_time(&status_of_rradio.ping_data.ping_time_and_destination, true)
+        } else {
+            "".to_string()
+        }; // it is too early to have got a response so shown nothing
 
         text_buffer.write_text_to_single_line(ping_message.bytes(), LineNum::Line2);
 

@@ -1,5 +1,4 @@
-//! reads the config.toml file that configures rr3
-
+//! reads the config.toml file that configures rrr
 use std::time::Duration;
 
 #[derive(Debug, serde::Deserialize)]
@@ -21,26 +20,20 @@ pub struct Config {
     #[serde(with = "humantime_serde")]
     pub buffering_duration: Option<Duration>,
 
-    //#[serde(with = "humantime_serde")]
-    // pub pause_before_playing_increment: Duration,
     pub goto_previous_track_time_delta: i64,
 
-    //pub maximum_error_recovery_attempts: usize,
-
-    //#[serde(with = "humantime_serde")]
-    //pub error_recovery_attempt_count_reset_time: Option<Duration>,
     pub time_initial_message_displayed_after_channel_change_as_ms: i64,
 
     pub max_number_of_remote_pings: u32,
 
-    pub scroll: Scroll,
+    pub scroll: Scroll, // the parameters that specify how the scroll reacts
 
     /// Notification sounds
     pub aural_notifications: AuralNotifications,
 
     pub cd_channel_number: Option<usize>, // in the range 0 to 99 inclusive
 
-    pub usb: Option<Usb>,
+    pub usb: Option<Usb>, // details on the USB
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -53,18 +46,18 @@ pub struct Usb {
     pub mount_folder: String,
 }
 
-/// the paramaters used by the scroll function
 #[derive(Debug, Default, serde::Deserialize)]
 #[serde(default)]
+/// the paramaters used by the scroll function
 pub struct Scroll {
     pub max_scroll: usize,
     pub min_scroll: usize,
     pub scroll_period_ms: u64,
 }
 
-/// Notifications allows rradio to play sounds to notify the user of events
 #[derive(Debug, Default, serde::Deserialize)]
 #[serde(default)]
+/// Notifications allows rradio to play sounds to notify the user of events
 pub struct AuralNotifications {
     /// Ready for input ie the  ding played when the program starts
     pub filename_startup: Option<String>,
@@ -94,9 +87,9 @@ impl Default for Config {
             //error_recovery_attempt_count_reset_time: Some(Duration::from_secs(30)),
             time_initial_message_displayed_after_channel_change_as_ms: 3000,
             scroll: Scroll {
-                max_scroll: 14,
-                min_scroll: 6,
-                scroll_period_ms: 1600,
+                max_scroll: 14,         // we want to advance at most that many characters
+                min_scroll: 6,          //minimum ammount of a scroll
+                scroll_period_ms: 1600, //  the time between scrolls in milli-seconds
             },
             aural_notifications: AuralNotifications::default(),
             cd_channel_number: None,
@@ -177,7 +170,7 @@ buffering_duration = "20s"
 #pause_before_playing_increment = "1s"          # the increment in the pauses before playing when an infinite stream terminates
 #max_pause_before_playing  = "10s"                      # maximum value of the pause
 
-smart_goto_previous_track_duration = 3000
+goto_previous_track_time_delta = 3500
 
 cd_channel_number = 0
 
@@ -185,9 +178,9 @@ max_number_of_remote_pings = 12
 
 
 [scroll]
-max_scroll = 14         #  maximum ammount of a scroll in charactters
+max_scroll = 14         #  maximum ammount of a scroll in characters
 min_scroll = 6          # minimuum ammount of a scroll
-scroll_period_ms = 1600 # the time between scrollsin misli-seconds
+scroll_period_ms = 1600 # the time between scrolls in milli-seconds
 
 
 [log_level]
@@ -205,7 +198,5 @@ cd_channel_number = 0
 channel_number = 99
 device = "/dev/sda1"
 mount_folder = "//home//pi//mount_folder"
-
-
 
 */

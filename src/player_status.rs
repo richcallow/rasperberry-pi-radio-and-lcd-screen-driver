@@ -1,7 +1,7 @@
 use chrono::{Duration, Utc};
 
 use crate::{
-    get_channel_details::{self, ChannelFileDataDecoded},
+    get_channel_details::{self, ChannelFileDataDecoded, SambaDetails},
     lcd::{
         self,
         get_local_ip_address::{self, NetworkData},
@@ -20,9 +20,10 @@ pub struct RealTimeDataOnOneChannel {
     pub index_to_current_track: usize,
     pub position: Duration,
     pub duration_ms: Option<u64>,
-    /// the address to ping is derived from the first station in the list
+    /// address_to_ping is derived from the first station in the list
     /// after stripping off the prefix & suffix
     pub address_to_ping: String,
+    pub samba_details: Option<SambaDetails>,
 }
 impl RealTimeDataOnOneChannel {
     pub fn new() -> Self {
@@ -30,9 +31,10 @@ impl RealTimeDataOnOneChannel {
             channel_data: get_channel_details::ChannelFileDataDecoded::new(),
             artist: String::new(),
             index_to_current_track: 0,
-            position: Duration::seconds(0),
+            position: Duration::zero(),
             duration_ms: None,
             address_to_ping: "8.8.8.8".to_string(), // a default value in case we do not find a valid address
+            samba_details: None,
         }
     }
 }
@@ -111,18 +113,6 @@ impl PlayerStatus {
         );*/
         println!("initial_volume\t\t\t{}\r", config.initial_volume);
         println!("input_timeout\t\t\t{:?}\r", config.input_timeout);
-        /*println!(
-            "max_pause_before_playing\t{:?}\r",
-            config.max_pause_before_playing
-        );
-        println!(
-            "maximum_error_recovery_attempts\t{}\r",
-            config.maximum_error_recovery_attempts
-        );
-        println!(
-            "pause_before_playing_increment\t\t{:?}\r",
-            config.pause_before_playing_increment
-        );*/
         println!(
             "max_number_of_pings_to_a_remote_destination\t{}\r",
             config.max_number_of_remote_pings
@@ -187,6 +177,13 @@ impl PlayerStatus {
                     self.position_and_duration[channel_count].address_to_ping
                 );
                 println!(
+                    "\tpause_before_playing_ms\t{:?}\r",
+                    self.position_and_duration[channel_count]
+                        .channel_data
+                        .pause_before_playing_ms
+                );
+
+                println!(
                     "\tposition\t\t{} s\r",
                     self.position_and_duration[channel_count]
                         .position
@@ -213,6 +210,8 @@ impl PlayerStatus {
                         .channel_data
                         .source_type
                 );
+
+                println!("\tsamba_details\t\t{:?}\r", self.position_and_duration[channel_count].samba_details);
 
                 println!(
                     "\tlast_track_is_a_ding\t{}\r",

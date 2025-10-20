@@ -36,16 +36,16 @@ pub fn try_once_to_get_wifi_network_data() -> Result<NetworkData, String> {
                 //contains a line such as "GENERAL.STATE   connected " followed by the SSID, or "GENERAL.STATE 30 (disconnected) ; the number spaces is indicative only
                 let output_as_a_vec_of_lines: Vec<&str> = // get the output as a vec of individual lines
                     output_as_ascii.split( '\n').collect();
-                let ssid_line_number = 5; // the SSID is on line 5
-                let local_ip_address_number = 7; // the local IP address is on line 7
-                let gateway_ip_address_number = 8; // the gatewway address is on line 8
-                let ssid = output_as_a_vec_of_lines[ssid_line_number] // [5] gives the SSID entry
-                    .substring(20, output_as_a_vec_of_lines[ssid_line_number].len()) //20 skips the name of the entry
+                const SSID_LINE_NUMBER: usize = 5; // the SSID is on line 5
+                const LOCAL_IP_ADDRESS_NUMBER: usize = 7; // the local IP address is on line 7
+                const GATEWAY_IP_ADDRESS_NUMBER: usize = 8; // the gatewway address is on line 8
+                let ssid = output_as_a_vec_of_lines[SSID_LINE_NUMBER] // [5] gives the SSID entry
+                    .substring(20, output_as_a_vec_of_lines[SSID_LINE_NUMBER].len()) //20 skips the name of the entry
                     .trim()
                     .to_string();
 
-                let mut local_ip_address = output_as_a_vec_of_lines[local_ip_address_number]
-                    .substring(15, output_as_a_vec_of_lines[local_ip_address_number].len())
+                let mut local_ip_address = output_as_a_vec_of_lines[LOCAL_IP_ADDRESS_NUMBER]
+                    .substring(15, output_as_a_vec_of_lines[LOCAL_IP_ADDRESS_NUMBER].len())
                     .to_string(); // 15 skips the name of the entry
                 local_ip_address = local_ip_address.trim().to_string(); // at this point it has the format 192.168.1.2/23 ie it contains the length too.
 
@@ -54,10 +54,10 @@ pub fn try_once_to_get_wifi_network_data() -> Result<NetworkData, String> {
                     // remove the length & the slash that precedes it
                 };
 
-                let gateway_ip_address = output_as_a_vec_of_lines[gateway_ip_address_number]
+                let gateway_ip_address = output_as_a_vec_of_lines[GATEWAY_IP_ADDRESS_NUMBER]
                     .substring(
                         15, // 15 skips the name of the entry
-                        output_as_a_vec_of_lines[gateway_ip_address_number].len(),
+                        output_as_a_vec_of_lines[GATEWAY_IP_ADDRESS_NUMBER].len(),
                     )
                     .trim()
                     .to_string();

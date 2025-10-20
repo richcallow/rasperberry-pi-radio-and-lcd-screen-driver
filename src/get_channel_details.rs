@@ -1,15 +1,15 @@
 //! This file get the details of the channel we are about to play as ChannelFileData
 //! It normally picks a random album & then plays all of that; however if a playlist is specified, it selects a random album and then plays it.
 
-/*use glib::FlagsBuilder;*/
 use std::{fs, os::fd::AsRawFd};
 use substring::Substring;
 
+use crate::lcd;
 use crate::{
     gstreamer_interfaces::PlaybinElement,
-    lcd,
     player_status::{PlayerStatus, START_UP_DING_CHANNEL_NUMBER},
 };
+
 pub mod cd_functions;
 mod mount_ext;
 
@@ -20,13 +20,16 @@ mod mount_ext;
 pub struct ChannelFileDataFromTOML {
     /// The name of the organisation    eg       organisation = "Tradcan"
     pub organisation: String,
+    //allows the buffer to fill before we start playing
+    pub pause_before_playing_ms: Option<u64>,
     /// What to play       eg       station_url = "https://dc1.serverse.com/proxy/wiupfvnu?mp=/TradCan\"
     pub station_url: Vec<String>,
-    /// typically /dev/sda1
+    /// typically /dev/sda1 or None
     pub playlist_device: Option<String>,
+    pub samba_details: SambaDetails,
 }
 
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Clone)]
 /// enum of the possible media types
 pub enum SourceType {
     /// will be unknown if the channel cannot be found.
@@ -36,6 +39,14 @@ pub enum SourceType {
     Cd,
     /// we will play random tracks on this USB device
     Usb,
+}
+
+#[derive(Debug, Default, PartialEq, Clone, serde::Deserialize)]
+pub struct SambaDetails {
+    pub device: String,
+    pub username: String,
+    pub password: String,
+    pub version: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -49,6 +60,8 @@ pub struct ChannelFileDataDecoded {
     pub source_type: SourceType,
     /// True if the last entry in URL list is a ding.
     pub last_track_is_a_ding: bool,
+    pub pause_before_playing_ms: Option<u64>,
+    pub samba_details: Option<SambaDetails>,
 }
 impl ChannelFileDataDecoded {
     pub fn new() -> Self {
@@ -57,6 +70,8 @@ impl ChannelFileDataDecoded {
             station_urls: vec![],
             source_type: SourceType::UnknownSourceType,
             last_track_is_a_ding: false,
+            pause_before_playing_ms: None,
+            samba_details: None,
         }
     }
 }
@@ -374,6 +389,8 @@ pub fn get_usb_details(
                     station_urls: list_of_wanted_tracks,
                     source_type: SourceType::Usb,
                     last_track_is_a_ding,
+                    pause_before_playing_ms: None,
+                    samba_details: None
                 })
             }
             Err(mount_error) => Err(mount_error), // return the error returned by the mount function
@@ -462,6 +479,8 @@ pub fn get_cd_details(
         station_urls: station_url,
         source_type: SourceType::Cd,
         last_track_is_a_ding,
+        pause_before_playing_ms: None,
+        samba_details: None,
     })
 }
 
@@ -472,6 +491,7 @@ pub fn store_channel_details_and_implement_them(
     status_of_rradio: &mut PlayerStatus,
     playbin: &PlaybinElement,
     previous_channel_number: usize,
+    lcdq: &mut lcd::Lc,
 ) -> Result<(), ChannelErrorEvents> {
     if (status_of_rradio.channel_number != previous_channel_number)
         && !(status_of_rradio.position_and_duration[status_of_rradio.channel_number]
@@ -486,7 +506,6 @@ pub fn store_channel_details_and_implement_them(
             status_of_rradio.toml_error = None;
 
             let mut source_address = new_channel_file_data.station_urls[0].clone();
-
             if let Some(position_double_slash) = source_address.find("//") {
                 let mut address_to_ping = source_address
                     .split_off(position_double_slash + 2)
@@ -499,16 +518,13 @@ pub fn store_channel_details_and_implement_them(
                 // but there might be a port number that we have to remove too
                 if let Some(position_of_colon) = address_to_ping.find(':') {
                     let _ = address_to_ping.split_off(position_of_colon);
-                    
                 }
                 status_of_rradio.position_and_duration[status_of_rradio.channel_number]
                     .address_to_ping = address_to_ping;
             }
-
             // set  organisation,  station_urls, source_type,  last_track_is_a_ding
             status_of_rradio.position_and_duration[status_of_rradio.channel_number].channel_data =
                 new_channel_file_data;
-
             Ok(())
         }
         Err(get_channel_details_error) => {
@@ -528,8 +544,12 @@ pub fn store_channel_details_and_implement_them(
                         .station_urls = vec![format!("file://{ding_filename}")];
                     status_of_rradio.position_and_duration[START_UP_DING_CHANNEL_NUMBER]
                         .index_to_current_track = 0;
-                    let _ignore_error_if_beep_fails =
-                        playbin.play_track(&status_of_rradio, &config.aural_notifications, false);
+                    let _ignore_error_if_beep_fails = playbin.play_track(
+                        &status_of_rradio,
+                        &config.aural_notifications,
+                        lcdq,
+                        false,
+                    );
                     status_of_rradio.position_and_duration[START_UP_DING_CHANNEL_NUMBER]
                         .index_to_current_track = 0;
                 }
@@ -619,17 +639,13 @@ fn get_channel_details(
                         error_message: "No URLs etc specified".to_string(),
                     });
                 } else {
-                    /*if toml_data.station_url.is_empty() {
-                        return Err(ChannelErrorEvents::CouldNotParseChannelFile {
-                            channel_number: status_of_rradio.channel_number,
-                            error_message: "No URLs etc specified".to_string(),
-                        });
-                    }*/
                     return Ok(ChannelFileDataDecoded {
                         organisation: toml_data.organisation,
                         station_urls: toml_data.station_url,
                         source_type: SourceType::UrlList,
                         last_track_is_a_ding: false,
+                        pause_before_playing_ms: toml_data.pause_before_playing_ms,
+                        samba_details: Some (toml_data.samba_details)
                     });
                 };
             }
@@ -717,6 +733,8 @@ fn set_up_playlist(
                             station_urls: list_of_audio_album_images,
                             source_type: SourceType::Usb,
                             last_track_is_a_ding,
+                            pause_before_playing_ms: toml_data.pause_before_playing_ms,
+                            samba_details: Some (toml_data.samba_details),
                         })
                     }
                     Err(error_message) => {

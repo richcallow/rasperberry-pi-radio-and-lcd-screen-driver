@@ -136,8 +136,6 @@ async fn main() -> Result<(), String> {
     match gstreamer_interfaces::PlaybinElement::setup(&config) {
         Ok((mut playbin, bus_stream)) => {
             /*println!("playbin{:?}    bus stream{:?}", playbin, bus_stream);  */
-
-            // if Some(filename) can match config.aural_notifications.filename_startup then execute the block
             if let Some(filename) = config.aural_notifications.filename_startup.clone() {
                 status_of_rradio.channel_number = player_status::START_UP_DING_CHANNEL_NUMBER;
 
@@ -149,9 +147,12 @@ async fn main() -> Result<(), String> {
                     [player_status::START_UP_DING_CHANNEL_NUMBER]
                     .channel_data
                     .source_type = SourceType::UrlList;
-                if let Err(error_message) =
-                    playbin.play_track(&status_of_rradio, &config.aural_notifications, false)
-                {
+                if let Err(error_message) = playbin.play_track(
+                    &status_of_rradio,
+                    &config.aural_notifications,
+                    &mut lcd,
+                    false,
+                ) {
                     status_of_rradio.all_4lines = ScrollData::new(error_message.as_str(), 4);
                     lcd.write_rradio_status_to_lcd(&status_of_rradio, &config);
                 }
@@ -222,6 +223,7 @@ async fn main() -> Result<(), String> {
                 //Now that we have an event, work out what to do with it
                 match event {
                     None => {
+                        // we are ending the program if we get to here
                         let _unmount_result = unmount_if_needed(&config, &mut status_of_rradio);
                         status_of_rradio.running_status = lcd::RunningStatus::ShuttingDown;
                         lcd.clear(); // we are ending the program if we get to here
@@ -278,13 +280,15 @@ async fn main() -> Result<(), String> {
                                 .position
                                 > TimeDelta::milliseconds(config.goto_previous_track_time_delta)
                             {
+                                // We have been playing for some time, so seek the start of the track
                                 let _ = playbin.playbin_element.seek_simple(
                                     SeekFlags::FLUSH
                                         | SeekFlags::KEY_UNIT
                                         | SeekFlags::SNAP_NEAREST,
-                                    gstreamer::ClockTime::from_seconds(0),
+                                    gstreamer::ClockTime::ZERO,
                                 );
                             } else {
+                                // we have only just started, so user wants the previous track
                                 status_of_rradio.position_and_duration
                                     [status_of_rradio.channel_number]
                                     .index_to_current_track = (status_of_rradio
@@ -304,6 +308,7 @@ async fn main() -> Result<(), String> {
                                 if let Err(playbin_error_message) = playbin.play_track(
                                     &status_of_rradio,
                                     &config.aural_notifications,
+                                    &mut lcd,
                                     false,
                                 ) {
                                     status_of_rradio.all_4lines.update_if_changed(
@@ -325,7 +330,7 @@ async fn main() -> Result<(), String> {
                         }
                         keyboard::Event::NextTrack => {
                             status_of_rradio.ping_data.number_of_pings_to_this_channel = 0;
-                            next_track(&mut status_of_rradio, &playbin, &config);
+                            next_track(&mut status_of_rradio, &playbin, &config, &mut lcd);
                         }
                         keyboard::Event::PlayStation { channel_number } => {
                             status_of_rradio.initialise_for_new_station();
@@ -347,6 +352,7 @@ async fn main() -> Result<(), String> {
                                         &mut status_of_rradio,
                                         &playbin,
                                         previous_channel_number,
+                                        &mut lcd,
                                     )
                                 {
                                     match the_channel_error_events {
@@ -371,6 +377,7 @@ async fn main() -> Result<(), String> {
                                                     .play_track(
                                                         &status_of_rradio,
                                                         &config.aural_notifications,
+                                                        &mut lcd,
                                                         false,
                                                     );
                                                 status_of_rradio.position_and_duration
@@ -402,6 +409,7 @@ async fn main() -> Result<(), String> {
                             if let Err(playbin_error_message) = playbin.play_track(
                                 &status_of_rradio,
                                 &config.aural_notifications,
+                                &mut lcd,
                                 true,
                             ) {
                                 status_of_rradio.all_4lines.update_if_changed(
@@ -511,7 +519,7 @@ async fn main() -> Result<(), String> {
                                     .len()
                                     > 1
                                 {
-                                    next_track(&mut status_of_rradio, &playbin, &config);
+                                    next_track(&mut status_of_rradio, &playbin, &config, &mut lcd);
                                 }
                             }
 
@@ -664,6 +672,7 @@ fn next_track(
     status_of_rradio: &mut PlayerStatus,
     playbin: &PlaybinElement,
     config: &crate::read_config::Config,
+    lcd: &mut crate::lcd::Lc,
 ) {
     status_of_rradio.running_status = RunningStatus::RunningNormally; // at least hope that this is true
     status_of_rradio.position_and_duration[status_of_rradio.channel_number]
@@ -676,7 +685,7 @@ fn next_track(
             .station_urls
             .len();
     if let Err(playbin_error_message) =
-        playbin.play_track(status_of_rradio, &config.aural_notifications, false)
+        playbin.play_track(status_of_rradio, &config.aural_notifications, lcd, false)
     {
         status_of_rradio.all_4lines.update_if_changed(
             format!(
