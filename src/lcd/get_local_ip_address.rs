@@ -1,5 +1,7 @@
 use substring::Substring;
 
+use crate::get_channel_details;
+
 #[derive(Debug)]
 /// if is_valid is true, contains the SSID, local & gateway IP addresses as strings.
 pub struct NetworkData {
@@ -17,6 +19,11 @@ impl NetworkData {
             gateway_ip_address: "8.8.8.8".to_string(),
             is_valid: false,
         }
+    }
+}
+impl Default for NetworkData {
+    fn default() -> Self {
+        NetworkData::new()
     }
 }
 
@@ -93,24 +100,30 @@ pub fn set_up_wifi_password(
 
     let mount_device;
     let mount_folder;
-    if let Some(usb) = &config.usb {
-        mount_device = &usb.device;
-        mount_folder = &usb.mount_folder;
+
+    if let Some(mount_data) = &config.mount_data {
+        if let Some(usb) = &config.usb {
+            mount_device = &usb.device;
+            mount_folder = &mount_data.mount_folder;
+        } else {
+            return Err(
+                "USB must be specified in TOML file so the program can read the SSID etc"
+                    .to_string(),
+            );
+        }
     } else {
-        return Err(
-            "USB must be specified in TOML file so the program can read the SSID etc".to_string(),
-        );
+        return Err("Mount folder and USB must be specified in TOML file so the program can read the SSID etc".to_string());
     }
 
     let passfile = format!("{mount_folder}//pass.toml");
 
     match sys_mount::Mount::builder()
-        .fstype("vfat")
+        .fstype("vfat")         // vfat as we are mounting a local USB memory stick
         .flags(sys_mount::MountFlags::RDONLY | sys_mount::MountFlags::NOATIME)
         .mount(mount_device, mount_folder)
     {
         Ok(_) => {
-            status_of_rradio.usb_is_mounted = true;
+            status_of_rradio.item_mounted = get_channel_details::ItemMounted::LocalUsb;
 
             if !std::path::Path::new(&passfile).exists() {
                 return Err(format!(
@@ -135,7 +148,7 @@ pub fn set_up_wifi_password(
                     error_message
                 ));
             } else {
-                status_of_rradio.usb_is_mounted = false; // we unmounted the USB stick OK
+                status_of_rradio.item_mounted = get_channel_details::ItemMounted::Nothing; // we unmounted the USB stick OK
             }
 
             match config_as_result {

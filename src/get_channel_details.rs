@@ -3,7 +3,7 @@
 
 use std::{fs, os::fd::AsRawFd};
 use substring::Substring;
-
+use crate::get_channel_details::mount_usb::mount_usb2;
 use crate::lcd;
 use crate::{
     gstreamer_interfaces::PlaybinElement,
@@ -11,7 +11,8 @@ use crate::{
 };
 
 pub mod cd_functions;
-mod mount_ext;
+mod mount_samba;
+mod mount_usb;
 
 /// The data about channel being played extracted from the TOML file.
 /// If there is an error trying to find a channel file, most of these entries will be empty
@@ -30,15 +31,25 @@ pub struct ChannelFileDataFromTOML {
 }
 
 #[derive(Debug, PartialEq, Clone)]
+pub enum ItemMounted {
+    LocalUsb,
+    RemoteUsb,
+    Nothing,
+}
+
+
+#[derive(Debug, PartialEq, Clone)]
 /// enum of the possible media types
 pub enum SourceType {
     /// will be unknown if the channel cannot be found.
-    UnknownSourceType,
+    UnknownSource,
     /// a list of URLs to play
     UrlList,
     Cd,
     /// we will play random tracks on this USB device
     Usb,
+    /// we will play random tracks on this USB device  
+    Samba,
 }
 
 #[derive(Debug, Default, PartialEq, Clone, serde::Deserialize)]
@@ -54,21 +65,21 @@ pub struct SambaDetails {
 pub struct ChannelFileDataDecoded {
     /// The name of the organisation    eg       organisation = "Tradcan"
     pub organisation: String,
-    /// What to play       eg       station_url = "https://dc1.serverse.com/proxy/wiupfvnu?mp=/TradCan\"
-    pub station_urls: Vec<String>,
     /// The type of the source, such as URL list, CD, USB or unknown
     pub source_type: SourceType,
     /// True if the last entry in URL list is a ding.
     pub last_track_is_a_ding: bool,
     pub pause_before_playing_ms: Option<u64>,
     pub samba_details: Option<SambaDetails>,
+    /// What to play       eg       station_url = "https://dc1.serverse.com/proxy/wiupfvnu?mp=/TradCan\"
+    pub station_urls: Vec<String>,
 }
 impl ChannelFileDataDecoded {
     pub fn new() -> Self {
         Self {
             organisation: String::new(),
             station_urls: vec![],
-            source_type: SourceType::UnknownSourceType,
+            source_type: SourceType::UnknownSource,
             last_track_is_a_ding: false,
             pause_before_playing_ms: None,
             samba_details: None,
@@ -76,6 +87,11 @@ impl ChannelFileDataDecoded {
     }
 }
 
+impl Default for ChannelFileDataDecoded {
+    fn default() -> Self {
+        ChannelFileDataDecoded::new()
+    }
+}
 /// an enum of errors returned by get_channel_details
 #[derive(Debug)]
 pub enum ChannelErrorEvents {
@@ -106,11 +122,18 @@ pub enum ChannelErrorEvents {
     /// Could not find the album specifed in the play list, possibly because the wrong memory stick is inserted
     CouldNotFindAlbum(String),
 
+    /// No Mount Device Specified In Config TOML file & one is needed 
+    /// before program can mount a USB memory device or a SAMBA file
+    NoMountDeviceSpecifiedInConfigTomlfile,
+
     /// no USB device, but one was requested.
     NoUSBDeviceSpecifiedInConfigTomlFile,
 
     /// No USBDevice
     NoUSBDevice,
+
+    /// If the mount data is not specified, the device cannot be mounted.
+    MountDataMustBeSpecifiedInTomlFile,
 
     /// USB mount error other than no USB device;
     /// the string contains the reason return by the Operating System
@@ -127,6 +150,9 @@ pub enum ChannelErrorEvents {
 
     /// could not get the number of tracks on the CD
     CouldNotGetNumberOfCDTracks(i32),
+
+    /// could not unmount a USB device or a Samba link
+    CouldNotUnMountDevice(String),
 }
 
 impl ChannelErrorEvents {
@@ -134,6 +160,7 @@ impl ChannelErrorEvents {
     pub fn to_lcd_screen(&self) -> String {
         match &self {
             ChannelErrorEvents::CouldNotFindChannelFile => "CouldNotFindChannelFile".to_string(),
+
             ChannelErrorEvents::CouldNotParseChannelFile {
                 channel_number,
                 error_message,
@@ -152,6 +179,10 @@ impl ChannelErrorEvents {
                     path_to_channel_file, error_message
                 )
             }
+            
+            ChannelErrorEvents::MountDataMustBeSpecifiedInTomlFile=> 
+            "Mount data must be specified in the TOML file".to_string(),
+
             ChannelErrorEvents::CouldNotReadChannelsFolder {
                 channels_folder,
                 error_message,
@@ -164,6 +195,10 @@ impl ChannelErrorEvents {
             ChannelErrorEvents::ErrorReadingFolderEntry { error_message } => {
                 format!("Error reading channel folder entry {}", error_message)
             }
+
+            ChannelErrorEvents::NoMountDeviceSpecifiedInConfigTomlfile=> 
+            "No mount device specified in config.toml file & thus cannot mount a USB stick or a SAMBA file"
+                .to_string(),
 
             ChannelErrorEvents::NoUSBDevice => "No USB device found".to_string(),
 
@@ -193,6 +228,8 @@ impl ChannelErrorEvents {
                     format!("CD open error {:?}", error_as_option)
                 }
             }
+            ChannelErrorEvents::CouldNotUnMountDevice(message ) => 
+                format!("could not unmount USB device or Samba link as {}", message),
 
             ChannelErrorEvents::FailedtoGetCDdriveOrDiskStatus(error) => match error {
                 &0 => "No info on CD in drive".to_string(), //CDS_NO_INFO
@@ -220,184 +257,198 @@ impl ChannelErrorEvents {
 ///
 pub fn get_usb_details(
     config: &crate::read_config::Config, // the data read from rradio's config.toml
-    status_of_rradio: &mut PlayerStatus,
+    status_of_rradio: &mut PlayerStatus, 
 ) -> Result<ChannelFileDataDecoded, ChannelErrorEvents> {
-    if let Some(usb_config) = &config.usb {
-        match mount_ext::mount(
-            &usb_config.device,
-            &usb_config.mount_folder,
-            status_of_rradio,
-        ) {
-            Ok(_mount_result) => {
-                let mut list_of_audio_album_images = vec![]; //get an empty list of all the audio CD images on the USB memory stick
+    if let Some(mount_data) = &config.mount_data {
+        let mount_result;
+        if let Some(usb ) = &mount_data.usb  {
+           if usb.channel_number == status_of_rradio.channel_number{            
+            mount_result = mount_usb2(config, status_of_rradio)}
+            else {mount_result = mount_samba::mount_samba(config, status_of_rradio); }       
+        } 
+        else {mount_result = mount_samba::mount_samba(config,status_of_rradio)};
+ 
+           match mount_result{          
+                Ok(_mount_result) => {
+                    //get an empty list of all the audio CD images on the USB memory stick or samba device
+                    let mut list_of_audio_album_images = vec![]; 
+                    let length_of_mount_folder_path = mount_data.mount_folder.len();
 
-                let length_of_mount_folder_path = usb_config.mount_folder.len();
-
-                match fs::read_dir(&usb_config.mount_folder) {
-                    Ok(artists) => {
-                        for artist_as_result in artists {
-                            if let Ok(artist_dir_entry) = artist_as_result {
-                                match fs::read_dir(artist_dir_entry.path()) {
-                                    Ok(albums) => {
-                                        for album_as_result in albums {
-                                            if let Ok(album_dir_entry) = album_as_result {
-                                                if let Ok(file_type) = album_dir_entry.file_type() {
-                                                    if file_type.is_dir() {
-                                                        match fs::read_dir(album_dir_entry.path()) {
-                                                            Ok(files) => {
-                                                                for file_as_result in files {
-                                                                    if let Ok(file_entry) =
-                                                                        file_as_result
-                                                                    {
-                                                                        let file_name_as_os_string =
-                                                                            file_entry.path();
-                                                                        let file_name = std::path::Path::new(&file_name_as_os_string);
-                                                                        let file_extension =  file_name.extension().map(|extension | extension.to_string_lossy().to_ascii_lowercase());
-
-                                                                        if let Some(
-                                                                            "mp3" | "wav" | "ogg"
-                                                                            | "flac",
-                                                                        ) = file_extension
-                                                                            .as_deref()
+                    match fs::read_dir(&mount_data.mount_folder) {
+                        Ok(artists) => {
+                            for artist_as_result in artists {
+                                if let Ok(artist_dir_entry) = artist_as_result {
+                                    match fs::read_dir(artist_dir_entry.path()) {
+                                        Ok(albums) => {
+                                            for album_as_result in albums {
+                                                if let Ok(album_dir_entry) = album_as_result {
+                                                    if let Ok(file_type) =
+                                                        album_dir_entry.file_type()
+                                                    {
+                                                        if file_type.is_dir() {
+                                                            match fs::read_dir(
+                                                                album_dir_entry.path(),
+                                                            ) {
+                                                                Ok(files) => {
+                                                                    for file_as_result in files {
+                                                                        if let Ok(file_entry) =
+                                                                            file_as_result
                                                                         {
-                                                                            list_of_audio_album_images.push(album_dir_entry
+                                                                            let file_name_as_os_string =
+                                                                                file_entry.path();
+                                                                            let file_name = std::path::Path::new(&file_name_as_os_string);
+                                                                            let file_extension =  file_name.extension().map(|extension | extension.to_string_lossy().to_ascii_lowercase());
+
+                                                                            if let Some(
+                                                                                "mp3" | "wav"
+                                                                                | "ogg" | "flac",
+                                                                            ) = file_extension
+                                                                                .as_deref()
+                                                                            {
+                                                                                list_of_audio_album_images.push(album_dir_entry
                                                                                 .path()
                                                                                 .to_string_lossy()
                                                                                 .to_string() );
-                                                                            break;
+                                                                                break;
+                                                                            }
+                                                                        } else {
+                                                                            return Err(ChannelErrorEvents::USBReadReadError("Failed while searching for audio files in folder".to_string()));
                                                                         }
-                                                                    } else {
-                                                                        return Err(ChannelErrorEvents::USBReadReadError("Failed while searching for audio files in folder".to_string()));
                                                                     }
                                                                 }
-                                                            }
-                                                            Err(error_message) => {
-                                                                return Err(
+                                                                Err(error_message) => {
+                                                                    return Err(
                                                                     ChannelErrorEvents::USBReadReadError(
                                                             format!("While searching for music files, got error {:?}",error_message),
                                                                     ),
                                                                 );
+                                                                }
                                                             }
-                                                        }
-                                                    } /*else {
-                                                          println!("skipping as not a folder\r")
-                                                      };*/
+                                                        } /*else {
+                                                              println!("skipping as not a folder\r")
+                                                          };*/
+                                                    } else {
+                                                        return Err(ChannelErrorEvents::USBReadReadError("Error when readiing USB; could not get the file type".to_string()));
+                                                    }
                                                 } else {
-                                                    return Err(ChannelErrorEvents::USBReadReadError("Error when readiing USB; could not get the file type".to_string()));
-                                                }
-                                            } else {
-                                                return Err(ChannelErrorEvents::USBReadReadError(
+                                                    return Err(ChannelErrorEvents::USBReadReadError(
                                                     "Read error When trying to read an album"
                                                         .to_string(),
                                                 ));
+                                                }
                                             }
                                         }
-                                    }
-                                    Err(error_message) => {
-                                        const OS_ERROR_NOT_A_DIRECTORY: i32 = 20; // if the error is not a directory we skip it.
-                                        if let Some(OS_ERROR_NOT_A_DIRECTORY) =
-                                            error_message.raw_os_error()
-                                        {
-                                        } else {
-                                            return Err(ChannelErrorEvents::USBReadReadError(
+                                        Err(error_message) => {
+                                            const OS_ERROR_NOT_A_DIRECTORY: i32 = 20; // if the error is not a directory we skip it.
+                                            if let Some(OS_ERROR_NOT_A_DIRECTORY) =
+                                                error_message.raw_os_error()
+                                            {
+                                            } else {
+                                                return Err(ChannelErrorEvents::USBReadReadError(
                                             format!(
                                             "When trying to get the folder containing the albums got error {}",
                                             error_message
                                         )
                                             .to_string(),
                                         ));
+                                            }
                                         }
                                     }
+                                } else {
+                                    return Err(ChannelErrorEvents::USBReadReadError(
+                                        "When trying to get the list of artists got error"
+                                            .to_string(),
+                                    ));
                                 }
-                            } else {
-                                return Err(ChannelErrorEvents::USBReadReadError(
-                                    "When trying to get the list of artists got error".to_string(),
-                                ));
                             }
                         }
-                    }
-                    Err(error_message) => {
-                        return Err(ChannelErrorEvents::USBReadReadError(format!(
-                            "When trying to get the folder containing the artists got error {}",
-                            error_message
-                        )));
-                    }
-                }
-
-                let chosen_album = list_of_audio_album_images
-                    [rand::random_range(0..=(list_of_audio_album_images.len() - 1))]
-                .as_str();
-
-                let mut list_of_wanted_tracks = vec![]; // list of the tracks that we will return
-                match fs::read_dir(chosen_album) {
-                    Ok(audio_files) => {
-                        for file_as_result in audio_files {
-                            if let Ok(audio_file_dir_entry) = file_as_result {
-                                if let Ok(file_type) = audio_file_dir_entry.file_type() {
-                                    if file_type.is_file() {
-                                        if let Some(audio_file) =
-                                            audio_file_dir_entry.path().as_os_str().to_str()
-                                        // got a valid audio file
-                                        {
-                                            list_of_wanted_tracks
-                                                .push(format!("file://{}", audio_file));
-                                            // we do not use {:?} in the format string as that adds unwanted quotes
-                                        }
-                                    }
-                                }
-                            } else {
-                                return Err(ChannelErrorEvents::USBReadReadError(
-                                    "Failed while geting audio file entries".to_string(),
-                                ));
-                            }
-                        }
-                    }
-                    Err(error_message) => {
-                        if let Some(2) = error_message.raw_os_error() {
-                            return Err(ChannelErrorEvents::CouldNotFindAlbum(format!(
-                                "whilst getting audio file names, could not find album {}",
-                                chosen_album
+                        Err(error_message) => {
+                            return Err(ChannelErrorEvents::USBReadReadError(format!(
+                                "When trying to get the folder containing the artists got error {}",
+                                error_message
                             )));
                         }
-
-                        return Err(ChannelErrorEvents::USBReadReadError(format!(
-                            "whilst getting audio file names got {:?}",
-                            error_message
-                        )));
                     }
-                }
-                let last_track_is_a_ding;
-                // if we get here everything has worked
-                if let Some(filename_sound_at_end_of_playlist) =
-                    &config.aural_notifications.filename_sound_at_end_of_playlist
-                {
-                    // add a ding if one has been specified at the end of the list of tracks
-                    list_of_wanted_tracks
-                        .push(format!("file://{}", filename_sound_at_end_of_playlist));
-                    last_track_is_a_ding = true;
-                } else {
-                    last_track_is_a_ding = false;
-                }
 
-                Ok(ChannelFileDataDecoded {
-                    organisation: chosen_album // if we remove the first part, we get the singer's name and the album name concatonated together
+                    let chosen_album = list_of_audio_album_images
+                        [rand::random_range(0..=(list_of_audio_album_images.len() - 1))]
+                    .as_str();
+
+                    let mut list_of_wanted_tracks = vec![]; // list of the tracks that we will return
+                    match fs::read_dir(chosen_album) {
+                        Ok(audio_files) => {
+                            for file_as_result in audio_files {
+                                if let Ok(audio_or_other_type_of_file_dir_entry) = file_as_result {
+                                    if let Ok(file_type) = audio_or_other_type_of_file_dir_entry.file_type() {
+                                        if file_type.is_file() {
+                                            if let Some(audio_file) =
+                                                audio_or_other_type_of_file_dir_entry.path().as_os_str().to_str()
+                                            // got a file not a folder, in the audio files folder. but is it an audio file
+                                            {
+                                                let file_name_as_os_string= audio_or_other_type_of_file_dir_entry.path();
+                                                let file_name = std::path::Path::new(&file_name_as_os_string);
+                                                let file_extension  = file_name.extension().map(|extension|extension.to_string_lossy().to_ascii_lowercase());
+                                                if let Some("mp3" |"wav" | "ogg" | "flac") = file_extension.as_deref(){
+                                                list_of_wanted_tracks
+                                                    .push(format!("file://{}", audio_file));
+                                                // we do not use {:?} in the format string as that adds unwanted quotes
+                                                }
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    return Err(ChannelErrorEvents::USBReadReadError(
+                                        "Failed while geting audio file entries".to_string(),
+                                    ));
+                                }
+                            }
+                        }
+                        Err(error_message) => {
+                            if let Some(2) = error_message.raw_os_error() {
+                                return Err(ChannelErrorEvents::CouldNotFindAlbum(format!(
+                                    "whilst getting audio file names, could not find album {}",
+                                    chosen_album
+                                )));
+                            }
+
+                            return Err(ChannelErrorEvents::USBReadReadError(format!(
+                                "whilst getting audio file names got {:?}",
+                                error_message
+                            )));
+                        }
+                    }
+                    let last_track_is_a_ding;
+                    // if we get here everything has worked
+                    if let Some(filename_sound_at_end_of_playlist) =
+                        &config.aural_notifications.filename_sound_at_end_of_playlist
+                    {
+                        // add a ding if one has been specified at the end of the list of tracks
+                        list_of_wanted_tracks
+                            .push(format!("file://{}", filename_sound_at_end_of_playlist));
+                        last_track_is_a_ding = true;
+                    } else {
+                        last_track_is_a_ding = false;
+                    }
+                    Ok(ChannelFileDataDecoded {
+                    organisation: chosen_album // if we remove the first part, we get the singer's name
+                    // and the album name concatonated together
                         .substring(
                             length_of_mount_folder_path + 1,
                             chosen_album.len(),
                         )
                         .to_string(),
                     station_urls: list_of_wanted_tracks,
-                    source_type: SourceType::Usb,
+                    source_type: status_of_rradio.position_and_duration[status_of_rradio.channel_number].channel_data.source_type.clone(),
                     last_track_is_a_ding,
-                    pause_before_playing_ms: None,
-                    samba_details: None
-                })
+                    pause_before_playing_ms: status_of_rradio.position_and_duration[status_of_rradio.channel_number].channel_data.pause_before_playing_ms,
+                    samba_details: status_of_rradio.position_and_duration[status_of_rradio.channel_number].channel_data.samba_details.clone(),
+                    })
+                }
+                Err(mount_error) => Err(mount_error), // return the error returned by the mount function
             }
-            Err(mount_error) => Err(mount_error), // return the error returned by the mount function
+        } else {
+            Err(ChannelErrorEvents::NoUSBDeviceSpecifiedInConfigTomlFile)
         }
-    } else {
-        Err(ChannelErrorEvents::NoUSBDeviceSpecifiedInConfigTomlFile)
-    }
 }
 
 //#[repr(C)]
@@ -505,6 +556,7 @@ pub fn store_channel_details_and_implement_them(
         Ok(new_channel_file_data) => {
             status_of_rradio.toml_error = None;
 
+            // next work out address to ping & store it
             let mut source_address = new_channel_file_data.station_urls[0].clone();
             if let Some(position_double_slash) = source_address.find("//") {
                 let mut address_to_ping = source_address
@@ -571,11 +623,24 @@ fn get_channel_details(
     config: &crate::read_config::Config, // the data read from rradio's config.toml
     status_of_rradio: &mut PlayerStatus,
 ) -> Result<ChannelFileDataDecoded, ChannelErrorEvents> {
-    if config
-        .usb
-        .as_ref()
-        .is_some_and(|usb_data| status_of_rradio.channel_number == usb_data.channel_number)
-    {
+    if config.mount_data.as_ref().is_some_and(|mount_data| {
+        mount_data
+            .usb
+            .as_ref()
+            .is_some_and(|usb| usb.channel_number == status_of_rradio.channel_number)
+    }) {
+        get_usb_details(
+            config,
+            &mut *status_of_rradio, // * means an immutable binding, which is a mutable re-borrow
+        )
+    } else if config.mount_data.as_ref().is_some_and(|mount_data| {
+        mount_data
+            .samba_details
+            .as_ref()
+            .is_some_and(|samba_details| {
+                samba_details.channel_number == status_of_rradio.channel_number
+            })
+    }) {
         get_usb_details(
             config,
             &mut *status_of_rradio, // * means an immutable binding, which is a mutable re-borrow
@@ -623,29 +688,30 @@ fn get_channel_details(
 
                 let toml_result: Result<ChannelFileDataFromTOML, toml::de::Error> =
                     toml::from_str(channel_file_info.trim_ascii_end());
-                let toml_data = toml_result.map_err(|toml_error| {
+                let channel_toml_data = toml_result.map_err(|toml_error| {
                     ChannelErrorEvents::CouldNotParseChannelFile {
                         channel_number: status_of_rradio.channel_number,
                         error_message: toml_error.to_string(),
                     }
                 })?;
 
-                if toml_data.playlist_device.is_some() {
-                    return set_up_playlist(toml_data, config, &mut *status_of_rradio);
+                // at this point, the channel_toml_data is the data from the channel file
+                if channel_toml_data.playlist_device.is_some() {
+                    return set_up_playlist(channel_toml_data, config, &mut *status_of_rradio);
                 // it is a playlist, not a simple USB system
-                } else if toml_data.station_url.is_empty() {
+                } else if channel_toml_data.station_url.is_empty() {
                     return Err(ChannelErrorEvents::CouldNotParseChannelFile {
                         channel_number: status_of_rradio.channel_number,
                         error_message: "No URLs etc specified".to_string(),
                     });
                 } else {
                     return Ok(ChannelFileDataDecoded {
-                        organisation: toml_data.organisation,
-                        station_urls: toml_data.station_url,
+                        organisation: channel_toml_data.organisation,
+                        station_urls: channel_toml_data.station_url,
                         source_type: SourceType::UrlList,
                         last_track_is_a_ding: false,
-                        pause_before_playing_ms: toml_data.pause_before_playing_ms,
-                        samba_details: Some (toml_data.samba_details)
+                        pause_before_playing_ms: channel_toml_data.pause_before_playing_ms,
+                        samba_details: Some(channel_toml_data.samba_details),
                     });
                 };
             }
@@ -654,32 +720,23 @@ fn get_channel_details(
     }
 }
 
-/// Sets up a playlist based on a random choice of the albums specified & then puts all of the tracks of the specfied album into the lsits of tracks to be played.
+/// Sets up a playlist based on a random choice of the albums specified & then puts all of the tracks of the specfied album into the list of tracks to be played.
 /// If specfied in the config TOML file, puts a ding at the end.
 fn set_up_playlist(
     toml_data: ChannelFileDataFromTOML,
     config: &crate::read_config::Config, // the data read from rrradio's config.toml
     status_of_rradio: &mut PlayerStatus,
 ) -> Result<ChannelFileDataDecoded, ChannelErrorEvents> {
-    let playlist_device;
-    if let Some(playlist_device_check) = toml_data.playlist_device {
-        playlist_device = playlist_device_check;
-    } else {
-        return Err(ChannelErrorEvents::NoUSBDeviceSpecifiedInConfigTomlFile);
-    }
-
-    if let Some(usb_config) = &config.usb {
-        match mount_ext::mount(
-            &playlist_device,
-            &usb_config.mount_folder,
-            &mut *status_of_rradio,
+    if let Some(mount_data) = &config.mount_data {
+        match  mount_usb2(config, status_of_rradio
         ) {
             Ok(_mount_result) => {
                 let chosen_album = toml_data.station_url
                     [rand::random_range(0..(toml_data.station_url.len()))]
                 .as_str();
 
-                let chosen_album_and_path = format!("{}/{}", usb_config.mount_folder, chosen_album);
+                let chosen_album_and_path =
+                    format!("{}/{}", &mount_data.mount_folder, chosen_album);
 
                 match fs::read_dir(&chosen_album_and_path) {
                     Ok(audio_files) => {
@@ -728,13 +785,15 @@ fn set_up_playlist(
                             last_track_is_a_ding = false;
                         }
 
+println!("toml_data{:?}\r",toml_data);
+
                         Ok(ChannelFileDataDecoded {
                             organisation: format!("{}/{}", chosen_album, toml_data.organisation),
                             station_urls: list_of_audio_album_images,
                             source_type: SourceType::Usb,
                             last_track_is_a_ding,
                             pause_before_playing_ms: toml_data.pause_before_playing_ms,
-                            samba_details: Some (toml_data.samba_details),
+                            samba_details: Some(toml_data.samba_details),
                         })
                     }
                     Err(error_message) => {

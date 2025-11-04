@@ -74,7 +74,12 @@ impl PingData {
             number_of_pings_to_this_channel: 0,
         }
     }
+
 }
+impl Default for PingData{
+    fn default() -> Self{PingData::new()}
+}
+
 /// Sends a ping to the local or remote address as required.
 /// Panics if it cannot ping.
 /// Sets can_send_ping to false as cannot ping again until we have received a response.
@@ -90,7 +95,7 @@ pub fn send_ping(
     let number_of_remote_pings_to_this_channel =
         status_of_rradio.ping_data.number_of_pings_to_this_channel;
 
-    let address = if (number_of_remote_pings_to_this_channel % 2 != 0)
+    let address = if (number_of_remote_pings_to_this_channel & 1 != 0)
         || (number_of_remote_pings_to_this_channel > config.max_number_of_remote_pings)
     {
         status_of_rradio.network_data.gateway_ip_address.to_string()
@@ -176,7 +181,7 @@ pub fn get_ping_time(
                                         time_in_ms: Some(time),
                                         destination,
                                     };
-                                return Ok(());
+                                Ok(())
                             }
                             Err(error_message) => {
                                 status_of_rradio.ping_data.ping_time_and_destination =

@@ -18,6 +18,7 @@ use crate::{
     lcd::get_local_ip_address,
     ping::{get_ping_time, see_if_there_is_a_ping_response},
     player_status::NUMBER_OF_POSSIBLE_CHANNELS,
+    unmount::unmount_if_needed,
 };
 use lcd::{RunningStatus, ScrollData, TextBuffer};
 
@@ -29,6 +30,7 @@ mod lcd;
 mod ping;
 mod player_status;
 mod read_config;
+mod unmount;
 
 /*#[macro_export]
 macro_rules! my_dbg {
@@ -391,7 +393,7 @@ async fn main() -> Result<(), String> {
                                         } => {
                                             status_of_rradio.toml_error = Some(format!(
                                                 "Could not parse channel {channel_number}. {}",
-                                                error_message
+                                                error_message.replace("\n", " ")
                                             ));
                                         }
 
@@ -405,7 +407,6 @@ async fn main() -> Result<(), String> {
                                     }
                                 }
                             }
-
                             if let Err(playbin_error_message) = playbin.play_track(
                                 &status_of_rradio,
                                 &config.aural_notifications,
@@ -581,7 +582,6 @@ async fn main() -> Result<(), String> {
                     } else {
                         0 // we do not need space
                     };
-
                 status_of_rradio.line_34_data.update_scroll(
                     &config,
                     lcd::NUM_CHARACTERS_PER_LINE * 2 - space_needed_for_buffer,
@@ -630,7 +630,7 @@ pub fn generate_line2(status_of_rradio: &PlayerStatus) -> String {
                 num_tracks
             )
         }
-        SourceType::Usb => {
+        SourceType::Usb | SourceType::Samba => {
             let mut num_tracks = status_of_rradio.position_and_duration
                 [status_of_rradio.channel_number]
                 .channel_data
@@ -658,7 +658,7 @@ pub fn generate_line2(status_of_rradio: &PlayerStatus) -> String {
             .channel_data
             .organisation
             .to_string(),
-        SourceType::UnknownSourceType => "Unnown source type".to_string(),
+        SourceType::UnknownSource => "Unnown source type".to_string(),
     };
     let throttled_status = lcd::get_throttled::is_throttled();
     if throttled_status.pi_is_throttled {
@@ -718,34 +718,5 @@ fn change_volume(
         );
     if let Err(error_message) = playbin.set_volume(status_of_rradio.current_volume) {
         eprintln!("When changing the volume got error {}\r", error_message);
-    }
-}
-
-/// unmounts whatever device is mounted if the mount folder; returns an error string if it fails
-fn unmount_if_needed(
-    config: &read_config::Config,
-    status_of_rradio: &mut player_status::PlayerStatus,
-) -> Result<(), String> {
-    if let Some(usb) = &config.usb {
-        if status_of_rradio.usb_is_mounted {
-            if let Err(error_message) =
-                sys_mount::unmount(&usb.mount_folder, sys_mount::UnmountFlags::DETACH)
-            {
-                eprintln!(
-                    "Failed to unmount the device mounted on {}. Got error {:?}\r",
-                    usb.mount_folder, error_message
-                );
-
-                return Err(format!(
-                    "Failed to unmount the device mounted on {}",
-                    usb.mount_folder
-                ));
-            } else {
-                status_of_rradio.usb_is_mounted = false
-            };
-        }
-        Ok(())
-    } else {
-        Ok(())
     }
 }

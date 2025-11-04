@@ -497,7 +497,6 @@ impl Lc {
         // if playng a CD or a USB mem stick we have a position & a duration
         // if playing a stream we have a position but the duration is none
         // if the position is less than x seconds, we display the media type
-
         let start_line1 = if status_of_rradio.position_and_duration[status_of_rradio.channel_number]
             .position
             .num_milliseconds()
@@ -509,7 +508,8 @@ impl Lc {
                 .source_type
             {
                 SourceType::Cd => "Playing CD".to_string(),
-                SourceType::Usb => format!("USB {}", status_of_rradio.channel_number),
+                SourceType::Usb => format!("Local USB {}", status_of_rradio.channel_number),
+                SourceType::Samba => format!("Remote USB {}", status_of_rradio.channel_number),
                 _ => format!("Station {}", status_of_rradio.channel_number),
             }
         } else {
@@ -518,7 +518,7 @@ impl Lc {
                 .channel_data
                 .source_type
             {
-                SourceType::Cd | SourceType::Usb => {
+                SourceType::Cd | SourceType::Usb |SourceType::Samba => {
                     let position_secs = status_of_rradio.position_and_duration
                         [status_of_rradio.channel_number]
                         .position
@@ -571,7 +571,7 @@ impl Lc {
                 SourceType::UrlList => {
                     if (status_of_rradio.ping_data.number_of_pings_to_this_channel
                         <= config.max_number_of_remote_pings)
-                        || (status_of_rradio.ping_data.number_of_pings_to_this_channel % 2 != 0)
+                        || (status_of_rradio.ping_data.number_of_pings_to_this_channel & 1 != 0)
                     {
                         Lc::format_ping_time(
                             &status_of_rradio.ping_data.ping_time_and_destination,
@@ -581,7 +581,7 @@ impl Lc {
                         format!("CPU Temp {}C", get_temperature::get_cpu_temperature())
                     }
                 }
-                SourceType::UnknownSourceType => "Unknown source".to_string(),
+                SourceType::UnknownSource => "Unknown source".to_string(),
             }
         };
 
@@ -679,18 +679,16 @@ impl Lc {
                     format!("{}{:.width$}ms", destination, ping_time_in_ms, width = 0)
                 }
             }
+        } else if long_string_wanted {
+            format!(
+                "{}Ping NoReply",
+                ping_time_and_destination.destination.to_short_string()
+            )
         } else {
-            if long_string_wanted {
-                format!(
-                    "{}Ping NoReply",
-                    ping_time_and_destination.destination.to_short_string()
-                )
-            } else {
-                format!(
-                    "{}Ping Noreply",
-                    ping_time_and_destination.destination.to_single_character()
-                )
-            }
+            format!(
+                "{}Ping Noreply",
+                ping_time_and_destination.destination.to_single_character()
+            )
         }
     }
 

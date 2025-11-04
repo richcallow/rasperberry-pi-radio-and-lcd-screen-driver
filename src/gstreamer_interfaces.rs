@@ -183,7 +183,7 @@ impl PlaybinElement {
                         {
                         if seek_wanted_if_possible {
                             match status_of_rradio.position_and_duration[status_of_rradio.channel_number].channel_data.source_type  {
-                                SourceType::Cd | SourceType::Usb => {
+                                SourceType::Cd | SourceType::Usb | SourceType::Samba => {
                                     let seek_time = gstreamer::ClockTime::from_seconds(status_of_rradio.position_and_duration[status_of_rradio.channel_number]
                                         .position.num_seconds() as u64); // the position we will seek to in the units needed.
                                     // we use seconds as the unit as that is directly avaialble AND without an "Option"
@@ -206,7 +206,7 @@ impl PlaybinElement {
                                         }
                                         return Ok(());                               
                                 }
-                                SourceType::UnknownSourceType|SourceType::UrlList => {
+                                SourceType::UnknownSource|SourceType::UrlList => {
                                     return Ok(()) // we are playing OK & not seeking , so there is nothing to do.
                                 }
                             } // end of the match

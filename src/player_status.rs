@@ -1,7 +1,7 @@
 use chrono::{Duration, Utc};
 
 use crate::{
-    get_channel_details::{self, ChannelFileDataDecoded, SambaDetails},
+    get_channel_details::{self, ChannelFileDataDecoded},
     lcd::{
         self,
         get_local_ip_address::{self, NetworkData},
@@ -15,15 +15,14 @@ use crate::{
 /// stores the decoded channel file data, the position of the tracks, ie the time since starting to play it
 /// &, if it is a streaming channel, the duration of the channel.
 pub struct RealTimeDataOnOneChannel {
-    pub channel_data: ChannelFileDataDecoded,
     pub artist: String,
     pub index_to_current_track: usize,
     pub position: Duration,
-    pub duration_ms: Option<u64>,
     /// address_to_ping is derived from the first station in the list
     /// after stripping off the prefix & suffix
     pub address_to_ping: String,
-    pub samba_details: Option<SambaDetails>,
+    pub duration_ms: Option<u64>,
+    pub channel_data: ChannelFileDataDecoded,
 }
 impl RealTimeDataOnOneChannel {
     pub fn new() -> Self {
@@ -34,8 +33,12 @@ impl RealTimeDataOnOneChannel {
             position: Duration::zero(),
             duration_ms: None,
             address_to_ping: "8.8.8.8".to_string(), // a default value in case we do not find a valid address
-            samba_details: None,
         }
+    }
+}
+impl Default for RealTimeDataOnOneChannel {
+    fn default() -> Self {
+        RealTimeDataOnOneChannel::new()
     }
 }
 
@@ -57,8 +60,8 @@ pub struct PlayerStatus {
     /// stores SSID, local IP address & gateway address
     pub network_data: get_local_ip_address::NetworkData,
 
-    /// true if the USB is mounted locally
-    pub usb_is_mounted: bool,
+    /// specifies what is mounted, eg local USB, remote USB (eg on server) or nothing
+    pub item_mounted: get_channel_details::ItemMounted,
     pub ping_data: ping::PingData,
     pub all_4lines: lcd::ScrollData,
     pub line_1_data: lcd::ScrollData,
@@ -85,7 +88,7 @@ impl PlayerStatus {
             current_volume: config.initial_volume,
             gstreamer_state: gstreamer::State::Null,
             buffering_percent: 0,
-            usb_is_mounted: false,
+            item_mounted: get_channel_details::ItemMounted::Nothing,
             network_data: NetworkData::new(),
             ping_data: ping::PingData::new(),
             time_started_playing_current_station: chrono::Utc::now(),
@@ -93,7 +96,7 @@ impl PlayerStatus {
     }
     /// initialises for a new station, sets time_started_playing_current_station, RunningStatus::RunningNormally,
     /// number_of_pings_to_this_channel = 0
-    pub fn initialise_for_new_station(&mut self) -> () {
+    pub fn initialise_for_new_station(&mut self) {
         self.time_started_playing_current_station = chrono::Utc::now();
         self.running_status = RunningStatus::RunningNormally;
         self.ping_data.number_of_pings_to_this_channel = 0;
@@ -129,6 +132,9 @@ impl PlayerStatus {
             config.time_initial_message_displayed_after_channel_change_as_ms
         );
         println!("usb\t\t\t\t{:?}\r", config.usb);
+        println!("samba_details\t\t\t{:?}\r", config.samba_details);
+        println!("mount_data\t\t\t{:?}\r", config.mount_data);
+
         println!("volume_offset\t\t\t{}\r", config.volume_offset);
     }
 
@@ -147,7 +153,7 @@ impl PlayerStatus {
         println!("gstreamer_state\t\t{:?}\r", self.gstreamer_state);
         println!("buffering_percent\t{}\r", self.buffering_percent);
         println!("network_data\t\t{:?}\r", self.network_data);
-        println!("usb_is_mounted\t\t{}\r", self.usb_is_mounted);
+        println!("item\t\t\t{:?}\r", self.item_mounted);
         println!("ping_data\t\t{:?}\r", self.ping_data);
         println!("all_4lines\t\t{:?}\r", self.all_4lines);
         println!("line_1_data\t\t{:?}\r", self.line_1_data);
@@ -167,6 +173,43 @@ impl PlayerStatus {
                 | (channel_count == self.channel_number)
             {
                 println!("channel_count {}\r", channel_count);
+
+                println!(
+                    "\tchannel_data.organisation\t\t{:?}\r",
+                    self.position_and_duration[channel_count]
+                        .channel_data
+                        .organisation
+                );
+                println!(
+                    "\tchannel_data.source_type\t\t{:?}\r",
+                    self.position_and_duration[channel_count]
+                        .channel_data
+                        .source_type
+                );
+                println!(
+                    "\tchannel_data.last_track_is_a_ding\t{}\r",
+                    self.position_and_duration[channel_count]
+                        .channel_data
+                        .last_track_is_a_ding
+                );
+                println!(
+                    "\tchannel_data.pause_before_playing_ms\t{:?}\r",
+                    self.position_and_duration[channel_count]
+                        .channel_data
+                        .pause_before_playing_ms
+                );
+                println!(
+                    "\tchannel_data.samba_details\t\t{:?}\r",
+                    self.position_and_duration[channel_count]
+                        .channel_data
+                        .samba_details
+                );
+
+                println!(
+                    "\tartist\t\t\t{}\r",
+                    self.position_and_duration[channel_count].artist
+                );
+
                 println!(
                     "\tindex_to_current_track\t{}\r",
                     self.position_and_duration[channel_count].index_to_current_track
@@ -175,12 +218,6 @@ impl PlayerStatus {
                 println!(
                     "\taddress_to_ping\t\t{}\r",
                     self.position_and_duration[channel_count].address_to_ping
-                );
-                println!(
-                    "\tpause_before_playing_ms\t{:?}\r",
-                    self.position_and_duration[channel_count]
-                        .channel_data
-                        .pause_before_playing_ms
                 );
 
                 println!(
@@ -192,32 +229,6 @@ impl PlayerStatus {
                 println!(
                     "\tduration_ms\t\t{:?}\r",
                     self.position_and_duration[channel_count].duration_ms
-                );
-
-                println!(
-                    "\tartist\t\t\t{}\r",
-                    self.position_and_duration[channel_count].artist
-                );
-                println!(
-                    "\torganisation\t\t{}\r",
-                    self.position_and_duration[channel_count]
-                        .channel_data
-                        .organisation
-                );
-                println!(
-                    "\tsource_type\t\t{:?}\r",
-                    self.position_and_duration[channel_count]
-                        .channel_data
-                        .source_type
-                );
-
-                println!("\tsamba_details\t\t{:?}\r", self.position_and_duration[channel_count].samba_details);
-
-                println!(
-                    "\tlast_track_is_a_ding\t{}\r",
-                    self.position_and_duration[channel_count]
-                        .channel_data
-                        .last_track_is_a_ding
                 );
 
                 println!("\n\tTrack information follows\r");

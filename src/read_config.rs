@@ -34,6 +34,17 @@ pub struct Config {
     pub cd_channel_number: Option<usize>, // in the range 0 to 99 inclusive
 
     pub usb: Option<Usb>, // details on the USB
+
+    pub samba_details: Option<SambaDetails>,
+
+    pub mount_data: Option<MountData>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct MountData {
+    pub mount_folder: String,
+    pub usb: Option<Usb>,
+    pub samba_details: Option <SambaDetails>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -42,8 +53,15 @@ pub struct Usb {
     pub channel_number: usize, // in the range 0 to 99 inclusive
     /// eg device = "/dev/sda1"
     pub device: String,
-    /// Folder where the USB drive is to be mounted
-    pub mount_folder: String,
+}
+
+#[derive(Debug, Default, PartialEq, Clone, serde::Deserialize)]
+pub struct SambaDetails {
+    pub channel_number: usize,
+    pub device: String, // eg  "//192.168.0.2/volume(sda1)"
+    pub username: String,
+    pub password: String,
+    pub version: Option<String>, // eg version = "3.0"
 }
 
 #[derive(Debug, Default, serde::Deserialize)]
@@ -94,6 +112,8 @@ impl Default for Config {
             aural_notifications: AuralNotifications::default(),
             cd_channel_number: None,
             usb: None,
+            samba_details: None,
+            mount_data: None,
             max_number_of_remote_pings: 15,
         }
     }
