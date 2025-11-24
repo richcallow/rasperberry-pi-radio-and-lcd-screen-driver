@@ -1,11 +1,12 @@
 use chrono::{Duration, Utc};
+use std::fs;
 
 use crate::{
     get_channel_details::{self, ChannelFileDataDecoded},
     lcd::{
-        self,
+        self, RunningStatus,
         get_local_ip_address::{self, NetworkData},
-        get_mute_state, RunningStatus,
+        get_mute_state,
     },
     ping,
     read_config::{self, Config},
@@ -46,7 +47,7 @@ impl Default for RealTimeDataOnOneChannel {
 pub const NUMBER_OF_POSSIBLE_CHANNELS: usize = 100;
 pub const START_UP_DING_CHANNEL_NUMBER: usize = NUMBER_OF_POSSIBLE_CHANNELS;
 #[derive(Debug)] // neither Copy nor clone are implmented as the player can only have a single status
-/// A struct listing all information needed to dispaly the status of rradio.
+/// A struct listing all information needed to display the status of rradio.
 pub struct PlayerStatus {
     pub toml_error: Option<String>,
     /// Specifies if we are starting up, in which case we want to see the startup message, shutting down or running normally.
@@ -59,9 +60,10 @@ pub struct PlayerStatus {
     pub buffering_percent: i32,
     /// stores SSID, local IP address & gateway address
     pub network_data: get_local_ip_address::NetworkData,
-
-    /// specifies what is mounted, eg local USB, remote USB (eg on server) or nothing
-    pub item_mounted: get_channel_details::ItemMounted,
+    /// specifies if there is a local USB memory stick mounted
+    pub usb_mounted: bool,
+    /// specifies if there is a remote SAMBA mounted device
+    pub samba_mounted: bool,
     pub ping_data: ping::PingData,
     pub all_4lines: lcd::ScrollData,
     pub line_1_data: lcd::ScrollData,
@@ -88,7 +90,8 @@ impl PlayerStatus {
             current_volume: config.initial_volume,
             gstreamer_state: gstreamer::State::Null,
             buffering_percent: 0,
-            item_mounted: get_channel_details::ItemMounted::Nothing,
+            usb_mounted: false,
+            samba_mounted: false,
             network_data: NetworkData::new(),
             ping_data: ping::PingData::new(),
             time_started_playing_current_station: chrono::Utc::now(),
@@ -110,10 +113,6 @@ impl PlayerStatus {
         );
         println!("buffering_duration\t\t{:?}\r", config.buffering_duration);
         println!("cd_channel_number\t\t{:?}\r", config.cd_channel_number);
-        /*println!(
-            "error_recovery_attempt_count_reset_time\t{:?}\r",
-            config.error_recovery_attempt_count_reset_time
-        );*/
         println!("initial_volume\t\t\t{}\r", config.initial_volume);
         println!("input_timeout\t\t\t{:?}\r", config.input_timeout);
         println!(
@@ -132,9 +131,7 @@ impl PlayerStatus {
             config.time_initial_message_displayed_after_channel_change_as_ms
         );
         println!("usb\t\t\t\t{:?}\r", config.usb);
-        println!("samba_details\t\t\t{:?}\r", config.samba_details);
-        println!("mount_data\t\t\t{:?}\r", config.mount_data);
-
+        println!("samba\t\t\t\t{:?}\r", config.samba);
         println!("volume_offset\t\t\t{}\r", config.volume_offset);
     }
 
@@ -153,7 +150,8 @@ impl PlayerStatus {
         println!("gstreamer_state\t\t{:?}\r", self.gstreamer_state);
         println!("buffering_percent\t{}\r", self.buffering_percent);
         println!("network_data\t\t{:?}\r", self.network_data);
-        println!("item\t\t\t{:?}\r", self.item_mounted);
+        println!("USB mounted\t\t{:?}\r", self.usb_mounted);
+        println!("Samba mounted\t\t{:?}\r", self.samba_mounted);
         println!("ping_data\t\t{:?}\r", self.ping_data);
         println!("all_4lines\t\t{:?}\r", self.all_4lines);
         println!("line_1_data\t\t{:?}\r", self.line_1_data);
@@ -247,6 +245,41 @@ impl PlayerStatus {
                     )
                 }
             }
+        }
+    }
+
+    pub fn output_mount_folder_contents(&self, config: &Config) {
+        if let Some(usb) = &config.usb {
+            let mount_folder = &usb.local_mount_folder;
+            match fs::read_dir(mount_folder) {
+                Ok(audio_files) => {
+                    println!("folder {:?}\r", audio_files);
+                    for file_as_result in audio_files {
+                        println!("file {:?}\r", file_as_result);
+                    }
+                }
+                Err(message) => {
+                    eprintln!("Failed to read folder and got {:?}\r", message)
+                }
+            }
+        } else {
+            println!("no USB data")
+        }
+        if let Some(samba) = &config.samba {
+            let mount_folder = &samba.remote_mount_folder;
+            match fs::read_dir(mount_folder) {
+                Ok(audio_files) => {
+                    println!("folder {:?}\r", audio_files);
+                    for file_as_result in audio_files {
+                        println!("file {:?}\r", file_as_result);
+                    }
+                }
+                Err(message) => {
+                    eprintln!("Failed to read folder and got {:?}\r", message)
+                }
+            }
+        } else {
+            println!("no samba data")
         }
     }
 

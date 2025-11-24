@@ -1,7 +1,6 @@
 use substring::Substring;
 
-use crate::get_channel_details;
-
+use crate::{mount_usb::mount_usb, unmount::unmount_if_needed};
 #[derive(Debug)]
 /// if is_valid is true, contains the SSID, local & gateway IP addresses as strings.
 pub struct NetworkData {
@@ -85,6 +84,11 @@ pub fn try_once_to_get_wifi_network_data() -> Result<NetworkData, String> {
     }
 }
 
+// set_up_wifi_password can be tested by using
+// nmcli connection show        to find the SSID of the wifi connection in use
+// nmcli connection delete the_ssid of the Wi-Fi connection
+// & then running the program
+
 /// Reads from file pass.toml in the device specified in the TOML configuration file the SSID and password & stores them in the operating system.
 /// If the USB path is not specified in the TOML configuration file, returns an error.
 /// If successful status_of_rradio.running_status is set to RunningStatus::Startingup;
@@ -98,148 +102,138 @@ pub fn set_up_wifi_password(
         .update_if_changed("Please wait maybe 20 seconds; trying to set new Wi-Fi password");
     lcd.write_rradio_status_to_lcd(status_of_rradio, config);
 
-    let mount_device;
     let mount_folder;
+    let config_as_result;
 
-    if let Some(mount_data) = &config.mount_data {
-        if let Some(usb) = &config.usb {
-            mount_device = &usb.device;
-            mount_folder = &mount_data.mount_folder;
-        } else {
-            return Err(
-                "USB must be specified in TOML file so the program can read the SSID etc"
-                    .to_string(),
-            );
-        }
-    } else {
-        return Err("Mount folder and USB must be specified in TOML file so the program can read the SSID etc".to_string());
-    }
+    if let Some(usb) = &config.usb {
+        mount_folder = &usb.local_mount_folder;
 
-    let passfile = format!("{mount_folder}//pass.toml");
-
-    match sys_mount::Mount::builder()
-        .fstype("vfat")         // vfat as we are mounting a local USB memory stick
-        .flags(sys_mount::MountFlags::RDONLY | sys_mount::MountFlags::NOATIME)
-        .mount(mount_device, mount_folder)
-    {
-        Ok(_) => {
-            status_of_rradio.item_mounted = get_channel_details::ItemMounted::LocalUsb;
-
-            if !std::path::Path::new(&passfile).exists() {
+        match mount_usb(usb, status_of_rradio) {
+            Ok(()) => {}
+            Err(error_message) => {
                 return Err(format!(
-                    "Wi-Fi does not seem to be working and cannot find the Wi-Fi password file {}",
-                    passfile
+                    "Wi-fi does not seem to be working and could not mount the memory stick to read the password file. Got error {:?}\r",
+                    error_message
                 ));
             }
+        }
 
-            let config_as_result =
-                std::fs::read_to_string(passfile.clone()).map_err(|toml_file_read_error| {
+        let passfile = format!("{mount_folder}//pass.toml");
+        if !std::path::Path::new(&passfile).exists() {
+            return Err(format!(
+                "Wi-Fi does not seem to be working and cannot find the Wi-Fi password file {}",
+                passfile
+            ));
+        }
+
+        config_as_result =
+            std::fs::read_to_string(passfile.clone()).map_err(|toml_file_read_error| {
+                format!(
+                    "Program {} Couldn't read file {passfile}. Got {toml_file_read_error}",
+                    env!("CARGO_PKG_NAME")
+                )
+            });
+        // next unmount the USB stick as we have read the file before any other errors might happen
+        if let Err(error_message) =
+            unmount_if_needed(&usb.local_mount_folder, &mut status_of_rradio.usb_mounted)
+        {
+            return Err(format!(
+                "When trying to unmount the USB stick after reading pass.toml got error {}",
+                error_message
+            ));
+        } else {
+            status_of_rradio.usb_mounted = false; // we unmounted the USB stick OK
+        }
+    } else {
+        return Err(
+            "USB must be specified in TOML file so the program can read the SSID etc".to_string(),
+        );
+    }
+
+    match config_as_result {
+        Ok(config_as_string) => {
+            #[derive(Debug, serde::Deserialize)] // serde::Deserialize is needed by toml::from_str
+            /// contains the Wi-Fi SSID & password
+            struct WifiData {
+                ssid: String,     // needs to be a string as we do not know its size at compile time
+                password: String, // needs to be a string as we do not know its size at compile time
+            }
+
+            let wifi_data_as_result: Result<WifiData, String> =
+                toml::from_str(&config_as_string).map_err(|toml_file_parse_error| {
                     format!(
-                        "Program {} Couldn't read file {passfile}. Got {toml_file_read_error}",
+                        "{} Couldn't parse pass.toml to get the SSID & password. Got {toml_file_parse_error}",
                         env!("CARGO_PKG_NAME")
                     )
                 });
-            // next unmount the USB stick as we have read the file before any other errors might happen
-            if let Err(error_message) =
-                sys_mount::unmount(mount_folder, sys_mount::UnmountFlags::DETACH)
-            {
-                return Err(format!(
-                    "When trying to unmount the USB stick after reading pass.toml got error {}",
-                    error_message
-                ));
-            } else {
-                status_of_rradio.item_mounted = get_channel_details::ItemMounted::Nothing; // we unmounted the USB stick OK
-            }
 
-            match config_as_result {
-                Ok(config_as_string) => {
-                    #[derive(Debug, serde::Deserialize)] // serde::Deserialize is needed by toml::from_str
-                    /// contains the Wi-Fi SSID & password
-                    struct WifiData {
-                        ssid: String,     // needs to be a string as we do not know its size at compile time
-                        password: String, // needs to be a string as we do not know its size at compile time
-                    }
-
-                    let wifi_data_as_result: Result<WifiData, String> =
-                        toml::from_str(&config_as_string).map_err(|toml_file_parse_error| {
-                            format!(
-                                "{} Couldn't parse pass.toml to get the SSID & password. Got {toml_file_parse_error}",
-                                env!("CARGO_PKG_NAME")
-                            )
-                        });
-
-                    match wifi_data_as_result {
-                        Ok(wi_fi_data) => {
-                            //  use the commnad "nmcli device password wifi connect the_ssid password thepassword"  (with no quotes)
-                            let args = [
-                                "device",
-                                "wifi",
-                                "connect",
-                                wi_fi_data.ssid.as_str(),
-                                "password",
-                                wi_fi_data.password.as_str(),
-                            ];
-                            let output2_as_result =
-                                std::process::Command::new("/bin/nmcli").args(args).output();
-                            match output2_as_result {
-                                Ok(result_as_bytes) => {
-                                    if !result_as_bytes.stdout.is_empty() {
-                                        // the command gave an output, possibly an error output
-                                        let result_of_setting_wifi_password = unsafe {
-                                            String::from_utf8_unchecked(result_as_bytes.stdout)
-                                        };
-                                        // the return string should be similar to "Device 'wlan0' successfully activated with '7c9b9098-88a2-4593-b541-5ef496f3781f'." with a trailing new line
-                                        // next we need to get the IP address, assuming it worked OK
-                                        if result_of_setting_wifi_password
-                                            .contains("successfully activated with ")
-                                        {
-                                            // not only did we get an output, but the SSID & password were accepted
-                                            match try_once_to_get_wifi_network_data() {
-                                                // so next get the network data
-                                                Ok(network_data) => {
-                                                    status_of_rradio.network_data = network_data;
-                                                    status_of_rradio.running_status =
-                                                        crate::RunningStatus::Startingup;
-                                                    Ok(())
-                                                }
-                                                Err(error_message) => {
-                                                     Err(format!( "Set Wi-Fi password seemingly sucessfully but could not get the IP addresss and got error {}", error_message).to_string())
-                                                }
-                                            }
-                                        } else {
-                                            Err("Tried to set Wi-FI SSID & password but failed"
-                                                .to_string())
+            match wifi_data_as_result {
+                Ok(wi_fi_data) => {
+                    //  use the commnad "nmcli device password wifi connect the_ssid password thepassword"  (with no quotes)
+                    let args = [
+                        "device",
+                        "wifi",
+                        "connect",
+                        wi_fi_data.ssid.as_str(),
+                        "password",
+                        wi_fi_data.password.as_str(),
+                    ];
+                    let output2_as_result =
+                        std::process::Command::new("/bin/nmcli").args(args).output();
+                    match output2_as_result {
+                        Ok(result_as_bytes) => {
+                            if !result_as_bytes.stdout.is_empty() {
+                                // the command gave an output, possibly an error output
+                                let result_of_setting_wifi_password =
+                                    unsafe { String::from_utf8_unchecked(result_as_bytes.stdout) };
+                                // the return string should be similar to "Device 'wlan0' successfully activated with '7c9b9098-88a2-4593-b541-5ef496f3781f'." with a trailing new line
+                                // next we need to get the IP address, assuming it worked OK
+                                if result_of_setting_wifi_password
+                                    .contains("successfully activated with ")
+                                {
+                                    // not only did we get an output, but the SSID & password were accepted
+                                    match try_once_to_get_wifi_network_data() {
+                                        // so next get the network data
+                                        Ok(network_data) => {
+                                            status_of_rradio.network_data = network_data;
+                                            status_of_rradio.running_status =
+                                                crate::RunningStatus::Startingup;
+                                            Ok(())
                                         }
-                                    } else if !result_as_bytes.stderr.is_empty() {
-                                        let stderr_output = unsafe {
-                                            String::from_utf8_unchecked(result_as_bytes.stderr)
-                                        };
-                                        Err(format!(
-                                            "When trying to set the SSID & Wi-Fi password got error {}",                                       
-                                            stderr_output.chars().take(stderr_output.len()-1).collect::<String>()
-
-                                        ))
-                                    } else {
-                                        Err("Failed to set the SSID & password for an unknown reason".to_string())
+                                        Err(error_message) => {
+                                                Err(format!( "Set Wi-Fi password seemingly sucessfully but could not get the IP addresss and got error {}", error_message).to_string())
+                                        }
                                     }
+                                } else {
+                                    Err("Tried to set Wi-FI SSID & password but failed".to_string())
                                 }
-                                Err(error) => {
-                                    Err(format!("Failed to set IP address; got error {}", error))
-                                }
+                            } else if !result_as_bytes.stderr.is_empty() {
+                                let stderr_output =
+                                    unsafe { String::from_utf8_unchecked(result_as_bytes.stderr) };
+                                Err(format!(
+                                    "When trying to set the SSID & Wi-Fi password got error {}",
+                                    stderr_output
+                                        .chars()
+                                        .take(stderr_output.len() - 1)
+                                        .collect::<String>()
+                                ))
+                            } else {
+                                Err("Failed to set the SSID & password for an unknown reason"
+                                    .to_string())
                             }
                         }
-                        Err(error) => Err(format!(
-                            "could not read pass.toml file. Got error {:?}\r",
-                            error
-                        )),
+                        Err(error) => Err(format!("Failed to set IP address; got error {}", error)),
                     }
                 }
                 Err(error) => Err(format!(
-                    "When parsing the pass.toml file, got error {:?}",
+                    "could not read pass.toml file. Got error {:?}\r",
                     error
                 )),
             }
         }
-        Err(error_message) => Err(format!("Wi-fi does not seem to be working and could not mount the memory stick to read the password file. Got error {:?}\r", error_message)),
+        Err(error) => Err(format!(
+            "When parsing the pass.toml file, got error {:?}",
+            error
+        )),
     }
 }

@@ -4,12 +4,17 @@
 #[cfg(not(unix))]
 compile_error!("You must compile this on linux");
 
+
 use chrono::TimeDelta;
 use futures_util::StreamExt;
 use get_channel_details::{ChannelErrorEvents, SourceType};
-use gstreamer::{prelude::ElementExtManual, SeekFlags};
+use gstreamer::{SeekFlags, prelude::ElementExtManual};
 use gstreamer_interfaces::PlaybinElement;
 use player_status::PlayerStatus;
+
+pub mod mount_usb;
+pub mod mount_samba;
+mod cd_functions;
 
 use std::task::Poll;
 
@@ -149,12 +154,9 @@ async fn main() -> Result<(), String> {
                     [player_status::START_UP_DING_CHANNEL_NUMBER]
                     .channel_data
                     .source_type = SourceType::UrlList;
-                if let Err(error_message) = playbin.play_track(
-                    &status_of_rradio,
-                    &config.aural_notifications,
-                    &mut lcd,
-                    false,
-                ) {
+                if let Err(error_message) =
+                    playbin.play_track(&mut  status_of_rradio, &config, &mut lcd, false)
+                {
                     status_of_rradio.all_4lines = ScrollData::new(error_message.as_str(), 4);
                     lcd.write_rradio_status_to_lcd(&status_of_rradio, &config);
                 }
@@ -180,6 +182,9 @@ async fn main() -> Result<(), String> {
                 tokio::time::interval(std::time::Duration::from_millis(300)),
             )
             .map(Event::Ticker);
+
+            //let g= get_local_ip_address::set_up_wifi_password(&mut status_of_rradio, &mut lcd, &config);
+
 
             let mut child_ping = ping::send_ping(&mut status_of_rradio, &config);
 
@@ -226,7 +231,24 @@ async fn main() -> Result<(), String> {
                 match event {
                     None => {
                         // we are ending the program if we get to here
-                        let _unmount_result = unmount_if_needed(&config, &mut status_of_rradio);
+                        if let Some(usb) = &config.usb
+                            && let Err(message) = &unmount_if_needed(
+                                &usb.local_mount_folder,
+                                &mut status_of_rradio.usb_mounted,
+                            )
+                        {
+                            eprintln!("Failed to unmount the local USB drive {}\r", message)
+                        }
+
+                        if let Some(samba) = &config.samba
+                            && let Err(message) = &unmount_if_needed(
+                                &samba.remote_mount_folder,
+                                &mut status_of_rradio.samba_mounted,
+                            )
+                        {
+                            eprintln!("Failed to unmount the remote USB drive {}\r", message)
+                        }
+
                         status_of_rradio.running_status = lcd::RunningStatus::ShuttingDown;
                         lcd.clear(); // we are ending the program if we get to here
                         lcd.write_rradio_status_to_lcd(&status_of_rradio, &config);
@@ -248,8 +270,7 @@ async fn main() -> Result<(), String> {
                         }
                         keyboard::Event::EjectCD => {
                             eprintln!(
-                                "eject result {:?}\r",
-                                get_channel_details::cd_functions::eject()
+                                "eject result {:?}\r",cd_functions::eject()
                             );
                         }
                         keyboard::Event::VolumeUp => {
@@ -307,12 +328,9 @@ async fn main() -> Result<(), String> {
                                         .channel_data
                                         .station_urls
                                         .len(); // % is a remainder operator not modulo
-                                if let Err(playbin_error_message) = playbin.play_track(
-                                    &status_of_rradio,
-                                    &config.aural_notifications,
-                                    &mut lcd,
-                                    false,
-                                ) {
+                                if let Err(playbin_error_message) =
+                                    playbin.play_track(&mut status_of_rradio, &config, &mut lcd, false)
+                                {
                                     status_of_rradio.all_4lines.update_if_changed(
                                     format!("When wanting to play the previous track got {playbin_error_message}")
                                         .as_str(),
@@ -345,6 +363,7 @@ async fn main() -> Result<(), String> {
                                 status_of_rradio.running_status = RunningStatus::RunningNormally;
                                 status_of_rradio.line_2_data.update_if_changed("");
                                 status_of_rradio.line_34_data.update_if_changed("");
+                                status_of_rradio.all_4lines.update_if_changed("");
                                 let previous_channel_number = status_of_rradio.channel_number;
                                 status_of_rradio.channel_number = channel_number;
 
@@ -377,8 +396,8 @@ async fn main() -> Result<(), String> {
                                                     vec![format!("file://{ding_filename}")];
                                                 let _ignore_error_if_beep_fails = playbin
                                                     .play_track(
-                                                        &status_of_rradio,
-                                                        &config.aural_notifications,
+                                                        &mut status_of_rradio,
+                                                        &config,
                                                         &mut lcd,
                                                         false,
                                                     );
@@ -407,12 +426,9 @@ async fn main() -> Result<(), String> {
                                     }
                                 }
                             }
-                            if let Err(playbin_error_message) = playbin.play_track(
-                                &status_of_rradio,
-                                &config.aural_notifications,
-                                &mut lcd,
-                                true,
-                            ) {
+                            if let Err(playbin_error_message) =
+                                playbin.play_track(&mut status_of_rradio, &config, &mut lcd, true)
+                            {
                                 status_of_rradio.all_4lines.update_if_changed(
                                     format!("When playing a track on channel {} got {playbin_error_message}", status_of_rradio.channel_number)
                                         .as_str());
@@ -431,6 +447,9 @@ async fn main() -> Result<(), String> {
                         }
                         keyboard::Event::OutputConfigDebug => {
                             status_of_rradio.output_config_information(&config);
+                        }
+                        keyboard::Event::OutputMountFolderContents => {
+                            status_of_rradio.output_mount_folder_contents(&config)
                         }
                     },
 
@@ -475,22 +494,23 @@ async fn main() -> Result<(), String> {
                                                     status_of_rradio
                                                         .line_2_data
                                                         .update_if_changed(organization);
-                                                    println!("got new organization!!! {organization:?}\r")
+                                                    println!(
+                                                        "got new organization!!! {organization:?}\r"
+                                                    )
                                                 }
                                             }
                                         }
                                         "artist" => {
-                                            if let Ok(artist) = tag_value.get::<&str>() {
-                                                if status_of_rradio.position_and_duration
+                                            if let Ok(artist) = tag_value.get::<&str>()
+                                                && status_of_rradio.position_and_duration
                                                     [status_of_rradio.channel_number]
                                                     .artist
                                                     != artist
-                                                {
-                                                    status_of_rradio.position_and_duration
-                                                        [status_of_rradio.channel_number]
-                                                        .artist = artist.to_string();
-                                                    println!("got new artist!!! {artist:?}\r")
-                                                }
+                                            {
+                                                status_of_rradio.position_and_duration
+                                                    [status_of_rradio.channel_number]
+                                                    .artist = artist.to_string();
+                                                println!("got new artist!!! {artist:?}\r")
                                             }
                                         }
                                         _ => {}
@@ -525,11 +545,17 @@ async fn main() -> Result<(), String> {
                             }
 
                             MessageView::Error(gstreamer_error) => {
-                                println!("gstreamer error {:?}\r", gstreamer_error);
-                                status_of_rradio.all_4lines = ScrollData::new(
-                                    format!("Gstreamer error {:?}\r", gstreamer_error).as_str(),
-                                    4,
-                                );
+                                let mut output_message =
+                                    format!("gstreamer_error {:?}", gstreamer_error);
+                                if let Some(message) = gstreamer_error.message().structure() {
+                                    let formatted_message = format!("{:?}", message);
+                                    if formatted_message.contains("No such file") {
+                                        output_message = formatted_message;
+                                    }
+                                }
+                                println!("gstreamer error {}\r", output_message);
+                                status_of_rradio.all_4lines =
+                                    ScrollData::new(output_message.as_str(), 4);
                                 status_of_rradio.running_status =
                                     RunningStatus::LongMessageOnAll4Lines;
                             }
@@ -540,25 +566,22 @@ async fn main() -> Result<(), String> {
                     Some(Event::Ticker(_now)) => {
                         if status_of_rradio.channel_number
                             <= player_status::NUMBER_OF_POSSIBLE_CHANNELS
-                        {
-                            if let Some(position_ms) = playbin
+                            && let Some(position_ms) = playbin
                                 .playbin_element
                                 .query_position::<gstreamer::ClockTime>()
                                 .map(gstreamer::ClockTime::mseconds)
-                            {
-                                if let Ok(position_i64) = i64::try_from(position_ms) {
-                                    status_of_rradio.position_and_duration
-                                        [status_of_rradio.channel_number]
-                                        .position = TimeDelta::milliseconds(position_i64);
-                                    status_of_rradio.position_and_duration
-                                        [status_of_rradio.channel_number]
-                                        .duration_ms = playbin
-                                        .playbin_element
-                                        .query_duration()
-                                        .map(gstreamer::ClockTime::mseconds);
-                                };
-                            } // else if there is no position we cannot do anything useful
-                        }
+                            && let Ok(position_i64) = i64::try_from(position_ms)
+                        {
+                            status_of_rradio.position_and_duration
+                                [status_of_rradio.channel_number]
+                                .position = TimeDelta::milliseconds(position_i64);
+                            status_of_rradio.position_and_duration
+                                [status_of_rradio.channel_number]
+                                .duration_ms = playbin
+                                .playbin_element
+                                .query_duration()
+                                .map(gstreamer::ClockTime::mseconds);
+                        } // else if there is no position we cannot do anything useful
                     }
                 }
                 status_of_rradio
@@ -684,9 +707,7 @@ fn next_track(
             .channel_data
             .station_urls
             .len();
-    if let Err(playbin_error_message) =
-        playbin.play_track(status_of_rradio, &config.aural_notifications, lcd, false)
-    {
+    if let Err(playbin_error_message) = playbin.play_track(status_of_rradio, config, lcd, false) {
         status_of_rradio.all_4lines.update_if_changed(
             format!(
                 "When wanting to play the next track playing a track got {playbin_error_message}"
@@ -710,7 +731,10 @@ fn change_volume(
     status_of_rradio: &mut player_status::PlayerStatus,
     playbin: &mut PlaybinElement,
 ) {
-    assert! ((direction ==1) || (direction == -1) || (direction == 0), "direction must be plus or minus 1 to change the volume, or zero to merely output the current volume");
+    assert!(
+        (direction == 1) || (direction == -1) || (direction == 0),
+        "direction must be plus or minus 1 to change the volume, or zero to merely output the current volume"
+    );
     status_of_rradio.current_volume =
         (status_of_rradio.current_volume + config.volume_offset * direction).clamp(
             gstreamer_interfaces::VOLUME_MIN,

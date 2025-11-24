@@ -31,20 +31,12 @@ pub struct Config {
     /// Notification sounds
     pub aural_notifications: AuralNotifications,
 
+    /// channel number of the CD drive, eg 00
     pub cd_channel_number: Option<usize>, // in the range 0 to 99 inclusive
 
     pub usb: Option<Usb>, // details on the USB
 
-    pub samba_details: Option<SambaDetails>,
-
-    pub mount_data: Option<MountData>,
-}
-
-#[derive(Debug, serde::Deserialize)]
-pub struct MountData {
-    pub mount_folder: String,
-    pub usb: Option<Usb>,
-    pub samba_details: Option <SambaDetails>,
+    pub samba: Option<SambaDetails>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -53,15 +45,28 @@ pub struct Usb {
     pub channel_number: usize, // in the range 0 to 99 inclusive
     /// eg device = "/dev/sda1"
     pub device: String,
+    /// Folder where the local drive will be mounted;
+    /// Must not the be same as the folder where the remote USB drive is mounted
+    pub local_mount_folder: String,
 }
 
 #[derive(Debug, Default, PartialEq, Clone, serde::Deserialize)]
+/// optionally specify in config.toml file if you want a local memory stick to work
+/// needs to start with the following so TOML expects the SAMBA details. [samba_details]
 pub struct SambaDetails {
+    /// eg channel_number = 88
     pub channel_number: usize,
-    pub device: String, // eg  "//192.168.0.2/volume(sda1)"
+    /// eg  device = "//192.168.0.2/volume(sda1)"
+    pub device: String,
+    /// eg username = "the user name"
     pub username: String,
+    /// eg password = "the password"
     pub password: String,
-    pub version: Option<String>, // eg version = "3.0"
+    /// eg version = "3.0"
+    pub version: Option<String>,
+    /// Folder where the remote drive will be mounted;
+    /// Must not the be same as the folder where the local USB drive is mounted
+    pub remote_mount_folder: String,
 }
 
 #[derive(Debug, Default, serde::Deserialize)]
@@ -112,8 +117,7 @@ impl Default for Config {
             aural_notifications: AuralNotifications::default(),
             cd_channel_number: None,
             usb: None,
-            samba_details: None,
-            mount_data: None,
+            samba: None,
             max_number_of_remote_pings: 15,
         }
     }
@@ -135,40 +139,59 @@ impl Config {
         let return_value_as_result: Result<Config, String> = toml::from_str(&config_as_string)
             .map_err(|toml_file_parse_error| {
                 format!(
-                    "{} couldn't parse {config_file_path:?} Got     {toml_file_parse_error}",
+                    "{} couldn't parse {config_file_path:?} Got {toml_file_parse_error}",
                     env!("CARGO_PKG_NAME")
                 )
             });
         //now verify that the specified files exist
         if let Ok(return_value) = &return_value_as_result {
-            if let Some(filename_startup) = &return_value.aural_notifications.filename_startup {
-                if !std::path::Path::new(filename_startup).exists() {
-                    return Err(format!(
-                        "Startup file {} specified in TOML file but not found",
-                        filename_startup
-                    ));
-                }
+            if let Some(filename_startup) = &return_value.aural_notifications.filename_startup
+                && !std::path::Path::new(filename_startup).exists()
+            {
+                return Err(format!(
+                    "Startup file {} specified in TOML file but not found",
+                    filename_startup
+                ));
             }
-        }
-        if let Ok(return_value) = &return_value_as_result {
-            if let Some(playlist_prefix) = &return_value.aural_notifications.playlist_prefix {
-                if !std::path::Path::new(playlist_prefix).exists() {
-                    return Err(format!(
-                        "playlist prefix file {} specified in TOML file but not found",
-                        playlist_prefix
-                    ));
-                }
+
+            if let Some(playlist_prefix) = &return_value.aural_notifications.playlist_prefix
+                && !std::path::Path::new(playlist_prefix).exists()
+            {
+                return Err(format!(
+                    "playlist prefix file {} specified in TOML file but not found",
+                    playlist_prefix
+                ));
             }
-        }
-        if let Ok(return_value) = &return_value_as_result {
+
             if let Some(playlistfilename_sound_at_end_of_playlist) = &return_value
                 .aural_notifications
                 .filename_sound_at_end_of_playlist
+                && !std::path::Path::new(playlistfilename_sound_at_end_of_playlist).exists()
             {
-                if !std::path::Path::new(playlistfilename_sound_at_end_of_playlist).exists() {
+                return Err(format!(
+                    "filename_sound_at_end_of_playlist file {} specified in TOML file but not found",
+                    playlistfilename_sound_at_end_of_playlist
+                ));
+            }
+
+            if let Some(usb) = &return_value.usb
+                && !std::path::Path::new(&usb.local_mount_folder).exists()
+            {
+                return Err(format!(
+                    "local USB mount folder {} specified in TOML file but not found",
+                    usb.local_mount_folder
+                ));
+            }
+            if let Some(samba) = &return_value.samba {
+                if let Some(usb) = &return_value.usb
+                    && samba.remote_mount_folder == usb.local_mount_folder
+                {
+                    return Err("Mount folder for local & remote USB must be different".to_string());
+                }
+                if !std::path::Path::new(&samba.remote_mount_folder).exists() {
                     return Err(format!(
-                        "filename_sound_at_end_of_playlist file {} specified in TOML file but not found",
-                        playlistfilename_sound_at_end_of_playlist
+                        "Remote USB mount folder {} specified in TOML file but not found",
+                        samba.remote_mount_folder
                     ));
                 }
             }
@@ -179,10 +202,11 @@ impl Config {
 }
 
 /* sample config file
+
 #this file is read at startup
 # first log entry affect all modules, except those that explicity have their own level. The levels are in the README
 
-stations_directory = "/boot/playlists3"
+stations_directory = "/home/pi/playlists"
 input_timeout = "3s"            # input timeout on the keyboard
 volume_offset = 5               # the ammount the volume changes when going up & down
 initial_volume = 75
@@ -196,27 +220,49 @@ cd_channel_number = 0
 
 max_number_of_remote_pings = 12
 
-
 [scroll]
-max_scroll = 14         #  maximum ammount of a scroll in characters
+max_scroll = 14         #  maximum ammount of a scroll in charactters
 min_scroll = 6          # minimuum ammount of a scroll
-scroll_period_ms = 1600 # the time between scrolls in milli-seconds
+scroll_period_ms = 1600 # the time between scrollsin misli-seconds
 
 
-[log_level]
-"rradio::audio_pipeline::controller::buffering" = "trace"
+#[log_level]
+#"rradio::audio_pipeline::controller::buffering" = "trace"
 
 [aural_notifications]
-filename_startup =  "/boot/sounds/KDE-Sys-App-Message.mp3"                      # sound played at startup
-filename_error =    "/boot/sounds/KDE-Sys-App-Message.mp3"                      # sound played if there is an error
-filename_sound_at_end_of_playlist =  "/boot/sounds/KDE-Sys-App-Message.mp3"     # beep at end of playlist
-
-
-cd_channel_number = 0
+filename_startup =  "/home/pi/sounds/KDE-Sys-App-Message.mp3"                   # sound played at startup
+filename_error =    "/home/pi/sounds/KDE-Sys-App-Message.mp3"                   # sound played if there is an error
+filename_sound_at_end_of_playlist =  "/home/pi/sounds/KDE-Sys-App-Message.mp3"  # beep at end of playlist
 
 [usb]
 channel_number = 99
-device = "/dev/sda1"
-mount_folder = "//home//pi//mount_folder"
+device= "/dev/sda1"
+local_mount_folder = "/home/pi/local_mount_folder"
+
+[samba]
+channel_number = 88
+device = "//192.168.0.2/volume(sda1)"
+username = "*******"
+password = "*******"
+version = "1.0"
+*/
+
+/*
+simple channel is as follows
+
+organisation = "the name "
+station_url = [
+"https://etc "
+]
+
+playlist is as follows
+
+organisation = "playlist name"
+station_url = [
+"artist name/disk name",
+"artist name2/disk name2",
+]
+
+playlist_device = "/dev/sda1"
 
 */

@@ -205,6 +205,12 @@ pub struct TextBuffer {
     buffer: [u8; NUM_CHARACTERS_PER_SCREEN],
 }
 
+impl Default for TextBuffer {
+    fn default() -> Self {
+        TextBuffer::new()
+    }
+}
+
 impl TextBuffer {
     /// Create a new empty textbuffer containing NUM_CHARACTERS_PER_SCREEN sapces
     pub const fn new() -> Self {
@@ -361,19 +367,18 @@ impl Lc {
                             let trimmed_line = line.trim_start();
                             if let Some(postion ) =  trimmed_line.find(" "){  // find the space after the PID
                             // use substring.to remove the space & all after it, leaving just the PID as characters  
-                                if let Ok (pid) = line.trim_start().substring(0, postion).parse::<u32>() {
-                                   if pid != my_pid { // we have found the PID to kill
-                                        match std::process::Command::new("/bin/kill").arg(format!("{pid}")).output()   {
-                                        Ok(_success_message)=> {std::thread::sleep(Duration::from_millis(50) ); //wait for the other program to be killed
-                                            let lcd_file = std::fs::File::options().write(true).open("/dev/lcd").
-                                            context("Failed to open LCD file after succesfully stopping a previous version of rradio.\r")?;
-                                            Self::clear_screen(&lcd_file);
-                                            return Ok(Lc {lcd_file})}
-                                        Err(failure_message)=> {
-                                            anyhow::bail!(format!(
-                                                "Probably failed to kill the previous process of this program that was using the screen{:?}. Got message\r", failure_message))}
-                                        }
-                                    }
+                                if let Ok (pid) = line.trim_start().substring(0, postion).parse::<u32>() && pid != my_pid {
+                                    // we have found the PID to kill
+                                    match std::process::Command::new("/bin/kill").arg(format!("{pid}")).output()   {
+                                    Ok(_success_message)=> {std::thread::sleep(Duration::from_millis(50) ); //wait for the other program to be killed
+                                        let lcd_file = std::fs::File::options().write(true).open("/dev/lcd").
+                                        context("Failed to open LCD file after succesfully stopping a previous version of rradio.\r")?;
+                                        Self::clear_screen(&lcd_file);
+                                        return Ok(Lc {lcd_file})}
+                                    Err(failure_message)=> {
+                                        anyhow::bail!(format!(
+                                            "Probably failed to kill the previous process of this program that was using the screen{:?}. Got message\r", failure_message))}
+                                    }                                  
                                 }
                             }
                         }
