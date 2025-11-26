@@ -168,6 +168,7 @@ impl PlayerStatus {
                 .channel_data
                 .station_urls
                 .is_empty())
+                | (channel_count == 88)
                 | (channel_count == self.channel_number)
             {
                 println!("channel_count {}\r", channel_count);
@@ -200,9 +201,8 @@ impl PlayerStatus {
                     "\tchannel_data.samba_details\t\t{:?}\r",
                     self.position_and_duration[channel_count]
                         .channel_data
-                        .samba_details
+                        .samba_details_all
                 );
-
                 println!(
                     "\tartist\t\t\t{}\r",
                     self.position_and_duration[channel_count].artist

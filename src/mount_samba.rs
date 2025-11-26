@@ -1,23 +1,26 @@
 use super::SourceType;
-use crate::get_channel_details::{ChannelErrorEvents, SambaDetails};
-use crate::player_status::PlayerStatus;
-use crate::read_config;
+use crate::get_channel_details::{ChannelErrorEvents};
+use crate::player_status::{PlayerStatus};
 
 /// mounts a remote memory stick using Samba & sets status_of_rradio.samba_mounted = true
-pub fn mount_samba(
-    samba_details: &read_config::SambaDetails, 
-    status_of_rradio: &mut PlayerStatus,
+pub fn mount_samba(status_of_rradio: &mut PlayerStatus,
 ) -> Result<(), ChannelErrorEvents> {
-    println!("trying to mount samba\r");
         if status_of_rradio.samba_mounted {
             println!("Samba is already mounted\r");
             return Ok(()); // it is already mounted
         }
-        let mut data_string = format!(
+    
+        if let Some (samba_data) = 
+                &status_of_rradio.position_and_duration[status_of_rradio.channel_number].channel_data.samba_details_all{
+
+        let mut data_string;
+        if let Some (authentication_data) = &samba_data.authentication_data{
+            data_string = format!(
             "user={},pass={}",
-            samba_details.username, samba_details.password
-        );
-        if let Some(version) = &samba_details.version {
+            authentication_data.username, authentication_data.password)
+        }
+        else {data_string = String::new()}
+        if let Some(version) = &samba_data.version {
             // for some devices, one must specify the version nmumber
             data_string = format!("{},vers={}", data_string, version) // so this line allows the user to specify the version
         }
@@ -28,20 +31,9 @@ pub fn mount_samba(
             .fstype("cifs") // cifs as were are mounting a SAMBA drive
             .flags(sys_mount::MountFlags::RDONLY | sys_mount::MountFlags::NOATIME)
             .data(&data_string)
-            .mount(&samba_details.device, &samba_details.remote_mount_folder);
+            .mount(&samba_data.device, &samba_data.remote_mount_folder);
         match mount_result_as_result {
             Ok(_) => {
-                status_of_rradio.position_and_duration[status_of_rradio.channel_number]
-                    .channel_data
-                    .source_type = SourceType::Samba;
-                status_of_rradio.position_and_duration[status_of_rradio.channel_number]
-                    .channel_data
-                    .samba_details = Some(SambaDetails {
-                    device: samba_details.device.clone(),
-                    password: samba_details.password.clone(),
-                    username: samba_details.username.clone(),
-                    version: samba_details.version.clone(),
-                });
                 status_of_rradio.samba_mounted = true;
                 Ok(())
             }
@@ -83,4 +75,8 @@ pub fn mount_samba(
                 }
             }
         }
+    }
+    else  { 
+        Err(ChannelErrorEvents::NoUSBDeviceSpecifiedInConfigTomlFile)
+    }
 }

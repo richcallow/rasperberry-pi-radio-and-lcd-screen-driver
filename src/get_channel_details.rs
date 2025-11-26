@@ -27,7 +27,6 @@ pub struct ChannelFileDataFromTOML {
     pub station_url: Vec<String>,
     /// typically /dev/sda1 or None
     pub playlist_device: Option<String>,
-    pub samba_details: SambaDetails,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -44,14 +43,6 @@ pub enum SourceType {
     Samba,
 }
 
-#[derive(Debug, Default, PartialEq, Clone, serde::Deserialize)]
-pub struct SambaDetails {
-    pub device: String,
-    pub username: String,
-    pub password: String,
-    pub version: Option<String>,
-}
-
 #[derive(Debug, PartialEq, Clone)]
 /// Decoded data sucessfully read from the station channel file, ie organisaton, source_type,
 /// if the last track is a ding, pause_before_playing_ms, samba_details & station_urls as a Vec,
@@ -63,7 +54,7 @@ pub struct ChannelFileDataDecoded {
     /// True if the last entry in URL list is a ding.
     pub last_track_is_a_ding: bool,
     pub pause_before_playing_ms: Option<u64>,
-    pub samba_details: Option<SambaDetails>,
+    pub samba_details_all: Option<read_config::SambaDetailsAll>,
     /// What to play       eg       station_url = "https://dc1.serverse.com/proxy/wiupfvnu?mp=/TradCan\"
     pub station_urls: Vec<String>,
 }
@@ -75,7 +66,7 @@ impl ChannelFileDataDecoded {
             source_type: SourceType::UnknownSource,
             last_track_is_a_ding: false,
             pause_before_playing_ms: None,
-            samba_details: None,
+            samba_details_all: None,
         }
     }
 }
@@ -241,7 +232,7 @@ impl ChannelErrorEvents {
 /// Given the folder that contains the channel files & the channel number as a string.
 /// If successful returns the details of the channel as the struct ChannelFileData
 /// namely organisation, station_url & sets the source type to be SourceType::UrlList
-/// works on both local USB devices & remotly mounted ones, which are expected to be 
+/// works on both local USB devices & remotly mounted ones, which are expected to be
 pub fn get_usb_details(
     config: &read_config::Config, // the data read from rradio's config.toml
     status_of_rradio: &mut PlayerStatus,
@@ -258,7 +249,7 @@ pub fn get_usb_details(
         && samba.channel_number == status_of_rradio.channel_number
     {
         mount_folder = &samba.remote_mount_folder;
-        mount_result = mount_samba::mount_samba(samba, status_of_rradio)
+        mount_result = mount_samba::mount_samba(status_of_rradio)
     } else {
         return Err(ChannelErrorEvents::CouldNotFindChannelFile);
     }
@@ -447,7 +438,7 @@ pub fn get_usb_details(
                     source_type: status_of_rradio.position_and_duration[status_of_rradio.channel_number].channel_data.source_type.clone(),
                     last_track_is_a_ding,
                     pause_before_playing_ms: status_of_rradio.position_and_duration[status_of_rradio.channel_number].channel_data.pause_before_playing_ms,
-                    samba_details: status_of_rradio.position_and_duration[status_of_rradio.channel_number].channel_data.samba_details.clone(),
+                    samba_details_all: status_of_rradio.position_and_duration[status_of_rradio.channel_number].channel_data.samba_details_all.clone(),
                     })
         }
         Err(mount_error) => Err(mount_error), // return the error returned by the mount function
@@ -534,7 +525,7 @@ pub fn get_cd_details(
         source_type: SourceType::Cd,
         last_track_is_a_ding,
         pause_before_playing_ms: None,
-        samba_details: None,
+        samba_details_all: None,
     })
 }
 
@@ -556,8 +547,10 @@ pub fn store_channel_details_and_implement_them(
         if let Some(usb) = &config.usb
             && status_of_rradio.usb_mounted
             && status_of_rradio.channel_number != usb.channel_number
-            && let Err(message) =
-                unmount::unmount_if_needed(&usb.local_mount_folder, & mut status_of_rradio.usb_mounted)
+            && let Err(message) = unmount::unmount_if_needed(
+                &usb.local_mount_folder,
+                &mut status_of_rradio.usb_mounted,
+            )
         {
             return Err(ChannelErrorEvents::CouldNotUnMountDevice(message));
         }
@@ -585,8 +578,6 @@ pub fn store_channel_details_and_implement_them(
                 }
                 status_of_rradio.position_and_duration[status_of_rradio.channel_number]
                     .address_to_ping = address_to_ping;
-
-
             }
             // set  organisation,  station_urls, source_type,  last_track_is_a_ding
             status_of_rradio.position_and_duration[status_of_rradio.channel_number].channel_data =
@@ -716,7 +707,7 @@ fn get_channel_details(
                         source_type: SourceType::UrlList,
                         last_track_is_a_ding: false,
                         pause_before_playing_ms: channel_toml_data.pause_before_playing_ms,
-                        samba_details: Some(channel_toml_data.samba_details),
+                        samba_details_all: None,
                     });
                 };
             }
@@ -796,7 +787,7 @@ fn set_up_playlist(
                             source_type: SourceType::Usb,
                             last_track_is_a_ding,
                             pause_before_playing_ms: toml_data.pause_before_playing_ms,
-                            samba_details: Some(toml_data.samba_details),
+                            samba_details_all: None,
                         })
                     }
                     Err(error_message) => {

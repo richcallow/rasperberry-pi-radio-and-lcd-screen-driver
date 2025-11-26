@@ -1,6 +1,11 @@
 //! reads the config.toml file that configures rrr
 use std::time::Duration;
 
+use crate::{
+    get_channel_details::ChannelFileDataDecoded,
+    player_status::{PlayerStatus, RealTimeDataOnOneChannel},
+};
+
 #[derive(Debug, serde::Deserialize)]
 #[serde(default)] // if any field is missing, use the value specified in the default
 /// Holds all the configuration information read from the TOML configuration file
@@ -36,7 +41,7 @@ pub struct Config {
 
     pub usb: Option<Usb>, // details on the USB
 
-    pub samba: Option<SambaDetails>,
+    pub samba: Option<SambaDetailsAll>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -49,19 +54,22 @@ pub struct Usb {
     /// Must not the be same as the folder where the remote USB drive is mounted
     pub local_mount_folder: String,
 }
+#[derive(Debug, Default, PartialEq, Clone, serde::Deserialize)]
+pub struct AuthenticationData {
+    pub username: String,
+    pub password: String,
+}
 
 #[derive(Debug, Default, PartialEq, Clone, serde::Deserialize)]
 /// optionally specify in config.toml file if you want a local memory stick to work
 /// needs to start with the following so TOML expects the SAMBA details. [samba_details]
-pub struct SambaDetails {
+pub struct SambaDetailsAll {
     /// eg channel_number = 88
     pub channel_number: usize,
     /// eg  device = "//192.168.0.2/volume(sda1)"
     pub device: String,
-    /// eg username = "the user name"
-    pub username: String,
-    /// eg password = "the password"
-    pub password: String,
+    /// contains username & password
+    pub authentication_data: Option<AuthenticationData>,
     /// eg version = "3.0"
     pub version: Option<String>,
     /// Folder where the remote drive will be mounted;
@@ -143,6 +151,7 @@ impl Config {
                     env!("CARGO_PKG_NAME")
                 )
             });
+
         //now verify that the specified files exist
         if let Ok(return_value) = &return_value_as_result {
             if let Some(filename_startup) = &return_value.aural_notifications.filename_startup
@@ -201,6 +210,33 @@ impl Config {
     }
 }
 
+pub fn insert_samba(config: &Config, status_of_rraadio: &mut PlayerStatus) {
+    if let Some(samba) = &config.samba {
+        let samba_clone = samba.clone();
+        status_of_rraadio.position_and_duration[samba.channel_number] = RealTimeDataOnOneChannel {
+            artist: String::new(),
+            address_to_ping: String::new(),
+            index_to_current_track: 0,
+            duration_ms: None,
+            position: chrono::Duration::zero(),
+            channel_data: ChannelFileDataDecoded {
+                organisation: String::new(),
+                last_track_is_a_ding: true,
+                pause_before_playing_ms: None,
+                source_type: crate::get_channel_details::SourceType::Samba,
+                station_urls: vec![],
+                samba_details_all: Some(SambaDetailsAll {
+                    channel_number: samba.channel_number,
+                    authentication_data: samba_clone.authentication_data,
+                    version: samba_clone.version,
+                    device: samba_clone.device,
+                    remote_mount_folder: samba_clone.remote_mount_folder,
+                }),
+            },
+        }
+    }
+}
+
 /* sample config file
 
 #this file is read at startup
@@ -242,9 +278,11 @@ local_mount_folder = "/home/pi/local_mount_folder"
 [samba]
 channel_number = 88
 device = "//192.168.0.2/volume(sda1)"
-username = "*******"
-password = "*******"
 version = "1.0"
+remote_mount_folder = "/home/pi/88"
+[samba.authentication_data]         # omit this entry if no  authentication data
+username = "the username"
+password = "the password"
 */
 
 /*
@@ -254,6 +292,16 @@ organisation = "the name "
 station_url = [
 "https://etc "
 ]
+
+or with a pause before playing to fill the buffer
+
+organisation = "thename2"
+pause_before_playing_ms = 5000
+station_url = [
+"http://etc   "
+]
+
+
 
 playlist is as follows
 

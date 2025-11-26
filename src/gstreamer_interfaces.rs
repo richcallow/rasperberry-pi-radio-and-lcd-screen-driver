@@ -53,7 +53,7 @@ fn mount_samba_if_necessary(
         && !status_of_rradio.samba_mounted
     {
         //we must mount the samba device
-        if let Err(error) = mount_samba::mount_samba(samba, status_of_rradio) {
+        if let Err(error) = mount_samba::mount_samba(status_of_rradio) {
             return Err(error.to_lcd_screen());
         }
     }
@@ -173,9 +173,14 @@ impl PlaybinElement {
         mount_usb_if_necessary(status_of_rradio, config)?; // returns the error value that mount_usb_if_necessary if mount_usb_if_necessary returns 
 
         if let Some(usb) = &config.usb
-            && usb.channel_number != status_of_rradio.channel_number 
-            && let Err (error) = unmount_if_needed(&usb.local_mount_folder, &mut status_of_rradio.usb_mounted) {
-                eprintln!("when unmounting USB stick as it was not being used, got error {}\r", error)
+            && usb.channel_number != status_of_rradio.channel_number
+            && let Err(error) =
+                unmount_if_needed(&usb.local_mount_folder, &mut status_of_rradio.usb_mounted)
+        {
+            eprintln!(
+                "when unmounting USB stick as it was not being used, got error {}\r",
+                error
+            )
         }
 
         mount_samba_if_necessary(status_of_rradio, config)?;
@@ -219,7 +224,7 @@ impl PlaybinElement {
             _ => status_of_rradio.channel_number,
         };
 
-        //next check that the index is in bounds to stop panicks occuring if there is a bug
+        //next check that the index is in bounds to stop panics occuring if there is a bug
         if status_of_rradio.position_and_duration[channel_number].index_to_current_track
             >= status_of_rradio.position_and_duration[channel_number]
                 .channel_data

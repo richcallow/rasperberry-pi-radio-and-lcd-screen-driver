@@ -106,6 +106,7 @@ async fn main() -> Result<(), String> {
         status_of_rradio.toml_error = Some(toml_error_message);
     }
 
+    read_config::insert_samba(&config, &mut status_of_rradio);
     // first assume that the WiFi is working and has a valid SSID & Password
     status_of_rradio.update_network_data(&mut lcd, &config);
 
