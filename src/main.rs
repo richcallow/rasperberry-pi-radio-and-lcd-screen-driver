@@ -4,7 +4,6 @@
 #[cfg(not(unix))]
 compile_error!("You must compile this on linux");
 
-
 use chrono::TimeDelta;
 use futures_util::StreamExt;
 use get_channel_details::{ChannelErrorEvents, SourceType};
@@ -12,9 +11,9 @@ use gstreamer::{SeekFlags, prelude::ElementExtManual};
 use gstreamer_interfaces::PlaybinElement;
 use player_status::PlayerStatus;
 
-pub mod mount_usb;
-pub mod mount_samba;
 mod cd_functions;
+pub mod mount_samba;
+pub mod mount_usb;
 
 use std::task::Poll;
 
@@ -73,6 +72,9 @@ enum Event {
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), String> {
     //    we need async as for example, we will need to wait for input from gstreamer or the keyboard
+
+    let dir = env::home_dir().expect("sfdsf");
+    println!("{}", dir.display());
 
     let mut lcd;
     match lcd::Lc::new() {
@@ -156,7 +158,7 @@ async fn main() -> Result<(), String> {
                     .channel_data
                     .source_type = SourceType::UrlList;
                 if let Err(error_message) =
-                    playbin.play_track(&mut  status_of_rradio, &config, &mut lcd, false)
+                    playbin.play_track(&mut status_of_rradio, &config, &mut lcd, false)
                 {
                     status_of_rradio.all_4lines = ScrollData::new(error_message.as_str(), 4);
                     lcd.write_rradio_status_to_lcd(&status_of_rradio, &config);
@@ -185,7 +187,6 @@ async fn main() -> Result<(), String> {
             .map(Event::Ticker);
 
             //let g= get_local_ip_address::set_up_wifi_password(&mut status_of_rradio, &mut lcd, &config);
-
 
             let mut child_ping = ping::send_ping(&mut status_of_rradio, &config);
 
@@ -270,9 +271,7 @@ async fn main() -> Result<(), String> {
                             }
                         }
                         keyboard::Event::EjectCD => {
-                            eprintln!(
-                                "eject result {:?}\r",cd_functions::eject()
-                            );
+                            eprintln!("eject result {:?}\r", cd_functions::eject());
                         }
                         keyboard::Event::VolumeUp => {
                             change_volume(1, &config, &mut status_of_rradio, &mut playbin);
@@ -329,9 +328,12 @@ async fn main() -> Result<(), String> {
                                         .channel_data
                                         .station_urls
                                         .len(); // % is a remainder operator not modulo
-                                if let Err(playbin_error_message) =
-                                    playbin.play_track(&mut status_of_rradio, &config, &mut lcd, false)
-                                {
+                                if let Err(playbin_error_message) = playbin.play_track(
+                                    &mut status_of_rradio,
+                                    &config,
+                                    &mut lcd,
+                                    false,
+                                ) {
                                     status_of_rradio.all_4lines.update_if_changed(
                                     format!("When wanting to play the previous track got {playbin_error_message}")
                                         .as_str(),
