@@ -54,6 +54,7 @@ pub struct PlayerStatus {
     /// or there is a bad error
     pub running_status: lcd::RunningStatus,
     /// in the range 00 to 99, normally, but the ding channel is 100
+    pub startup_folder: String,
     pub channel_number: usize,
     pub current_volume: i32,
     pub gstreamer_state: gstreamer::State,
@@ -82,6 +83,7 @@ impl PlayerStatus {
             toml_error: None,
             running_status: lcd::RunningStatus::Startingup,
             channel_number: NUMBER_OF_POSSIBLE_CHANNELS,
+            startup_folder: String::new(),
             position_and_duration: std::array::from_fn(|_index| RealTimeDataOnOneChannel::new()),
             all_4lines: lcd::ScrollData::new("", 4),
             line_1_data: lcd::ScrollData::new("", 1),
@@ -136,7 +138,7 @@ impl PlayerStatus {
     }
 
     /// outputs whether or not the amplifier is muted & the status information
-    pub fn output_debug_info(&self) {
+    pub fn output_rradio(&self) {
         println!("\nstatus of rradio follows\r");
         println!(
             "Throttled_status\t{:?}\r",
@@ -145,6 +147,7 @@ impl PlayerStatus {
         println!("mute state is \t\t{}\r", get_mute_state::get_mute_state());
         println!("toml_error\t\t{:?}\r", self.toml_error);
         println!("running_status\t\t{:?}\r", self.running_status);
+        println!("startup folder\t\t{}\r", self.startup_folder);
         println!("channel_number\t\t{}\r", self.channel_number);
         println!("current_volume\t\t{}\r", self.current_volume);
         println!("gstreamer_state\t\t{:?}\r", self.gstreamer_state);
@@ -290,7 +293,7 @@ impl PlayerStatus {
         &mut self,
         lcd: &mut crate::lcd::Lc,
         config: &crate::read_config::Config,
-    ) {
+    ) {      
         self.running_status = RunningStatus::LongMessageOnAll4Lines;
         for count in 0..40 {
             // go round the loop multiple times looking for the IP address

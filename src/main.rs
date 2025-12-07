@@ -83,29 +83,34 @@ async fn main() -> Result<(), String> {
         }
     }
 
-    let mut config_file_path = "config2.toml".to_string(); // the default path to the config TOML file
+    let mut config_file_path = "config.toml".to_string(); // the default file name of the config TOML file
+    let root_folder;
 
-    if let Some(path) = std::env::args().next() && let Some(position) = path.rfind("/"){
-        let root_folder= path[0..position+1].to_string();
+    if let Some(path) = std::env::args().next()
+        && let Some(position) = path.rfind("/")
+    {
+        root_folder = path[0..position + 1].to_string();
         config_file_path = format!("{}{}", root_folder, config_file_path);
-    }
-
-    match get_config_file_path::get_config_file_path(&config_file_path) {
-        Ok(new_path) => config_file_path = new_path,
-        Err(error_message) => {
-            let mut text_buffer = TextBuffer::new();
-            text_buffer.write_text_to_lines(error_message.bytes(), lcd::LineNum::Line1, 4);
-            lcd.write_text_buffer_to_lcd(&text_buffer);
-        }
+    } else {
+        root_folder = String::new();
     }
 
     let mut toml_error: Option<String> = None; // a temporary store of the master store; we need a temporary store as we cannot create status_of_rradio until we have read the config file
+    match get_config_file_path::get_config_file_path(&config_file_path) {
+        Ok(new_path) => config_file_path = new_path,
+        Err(error_message) => {
+            eprintln!("{}", error_message);
+            toml_error = Some(error_message);
+        }
+    }
+
     let config = read_config::Config::from_file(&config_file_path).unwrap_or_else(|error| {
         toml_error = Some(error);
         read_config::Config::default()
     });
 
     let mut status_of_rradio: PlayerStatus = PlayerStatus::new(&config);
+    status_of_rradio.startup_folder = root_folder;
     if let Some(toml_error_message) = toml_error {
         // if we got an error we should display it; hopefully, toml_error == none
         status_of_rradio.toml_error = Some(toml_error_message);
@@ -449,7 +454,7 @@ async fn main() -> Result<(), String> {
                             }
                         }
                         keyboard::Event::OutputStatusDebug => {
-                            status_of_rradio.output_debug_info();
+                            status_of_rradio.output_rradio();
                         }
                         keyboard::Event::OutputConfigDebug => {
                             status_of_rradio.output_config_information(&config);

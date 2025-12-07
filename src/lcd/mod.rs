@@ -37,6 +37,7 @@ pub enum LineNum {
 /// Specifies if we are starting up, in which case we want to see the startup message, shutting down or running normally.
 /// or there is a long message to display
 pub enum RunningStatus {
+    /// program is starting up
     Startingup,
     /// User entered a channel that could not be found
     NoChannel,
