@@ -1,10 +1,25 @@
 //! reads the config.toml file that configures rrr
 use std::time::Duration;
 
+use gstreamer::ClockTime;
+
 use crate::{
     get_channel_details::ChannelFileDataDecoded,
     player_status::{PlayerStatus, RealTimeDataOnOneChannel},
 };
+
+/// used to convert a TOML string to clock time
+///
+fn deserialize_clocktime<'de, D: serde::Deserializer<'de>>(
+    // "de" is, by convention, the name of the lifetime of the input.
+    // this function is needed by #[derive(serde::Deserialize)] (called by toml::from_str),
+    // which requires #[serde(deserialize_with = "deserialize_clocktime")]
+    deserializer: D,
+) -> Result<ClockTime, D::Error> {
+    humantime_serde::deserialize(deserializer).and_then(|duration: std::time::Duration| {
+        ClockTime::try_from(duration).map_err(serde::de::Error::custom)
+    })
+}
 
 #[derive(Debug, serde::Deserialize)]
 #[serde(default)] // if any field is missing, use the value specified in the default
@@ -25,9 +40,11 @@ pub struct Config {
     #[serde(with = "humantime_serde")]
     pub buffering_duration: Option<Duration>,
 
-    pub goto_previous_track_time_delta: i64,
+    #[serde(deserialize_with = "deserialize_clocktime")]
+    pub goto_previous_track_time_delta: ClockTime,
 
-    pub time_initial_message_displayed_after_channel_change_as_ms: i64,
+    #[serde(deserialize_with = "deserialize_clocktime")]
+    pub time_initial_message_displayed_after_channel_change: ClockTime,
 
     pub max_number_of_remote_pings: u32,
 
@@ -39,31 +56,24 @@ pub struct Config {
     /// channel number of the CD drive, eg 00
     pub cd_channel_number: Option<usize>, // in the range 0 to 99 inclusive
 
-    pub usb: Option<Usb>, // details on the USB
+    ///details on the local memory stick
+    pub usb: Option<MediaDetails>, //details on the local memory stick
 
-    pub samba: Option<SambaDetailsAll>,
+    ///details of a memory stick on a Samba share
+    pub samba: Option<MediaDetails>,
 }
 
-#[derive(Debug, serde::Deserialize)]
-pub struct Usb {
-    /// 2 digit channel number
-    pub channel_number: usize, // in the range 0 to 99 inclusive
-    /// eg device = "/dev/sda1"
-    pub device: String,
-    /// Folder where the local drive will be mounted;
-    /// Must not the be same as the folder where the remote USB drive is mounted
-    pub local_mount_folder: String,
-}
 #[derive(Debug, Default, PartialEq, Clone, serde::Deserialize)]
 pub struct AuthenticationData {
     pub username: String,
     pub password: String,
 }
 
-#[derive(Debug, Default, PartialEq, Clone, serde::Deserialize)]
+#[derive(Debug, PartialEq, Clone, serde::Deserialize)]
 /// optionally specify in config.toml file if you want a local memory stick to work
-/// needs to start with the following so TOML expects the SAMBA details. [samba_details]
-pub struct SambaDetailsAll {
+/// needs to start with the following so TOML expects the media details.
+pub struct MediaDetails {
+    //details of a local memory stick or a Samba device
     /// eg channel_number = 88
     pub channel_number: usize,
     /// eg  device = "//192.168.0.2/volume(sda1)"
@@ -71,10 +81,20 @@ pub struct SambaDetailsAll {
     /// contains username & password
     pub authentication_data: Option<AuthenticationData>,
     /// eg version = "3.0"
+    #[serde(alias = "Version")] // allows version to start with upper or Lower V.
     pub version: Option<String>,
     /// Folder where the remote drive will be mounted;
-    /// Must not the be same as the folder where the local USB drive is mounted
-    pub remote_mount_folder: String,
+    /// Must not be the same as the folder where the local USB drive is mounted
+    pub mount_folder: String,
+    /// specifies if the device is mounted
+    #[serde(skip, default = "is_mounted_default")]
+    // skip means that even if the users specify it as true,
+    // the deserializer will skip what they have entered and it will be false.
+    pub is_mounted: bool, // the user should not specify this & it must be false on startup
+}
+/// the default value for is_mounted;
+fn is_mounted_default() -> bool {
+    false
 }
 
 #[derive(Debug, Default, serde::Deserialize)]
@@ -93,9 +113,6 @@ pub struct AuralNotifications {
     /// Ready for input ie the  ding played when the program starts
     pub filename_startup: Option<String>,
 
-    /// Played before the station track, ie after you have entered 2 digits and before a track is played
-    pub playlist_prefix: Option<String>,
-
     /// Name of the file played at the end of the list of tracks, ie another ding
     pub filename_sound_at_end_of_playlist: Option<String>,
 
@@ -113,10 +130,10 @@ impl Default for Config {
             buffering_duration: None,
             //pause_before_playing_increment: Duration::from_secs(1),
             //max_pause_before_playing: Duration::from_secs(5),
-            goto_previous_track_time_delta: 2000,
+            goto_previous_track_time_delta: ClockTime::from_mseconds(2000),
             //maximum_error_recovery_attempts: 5,
             //error_recovery_attempt_count_reset_time: Some(Duration::from_secs(30)),
-            time_initial_message_displayed_after_channel_change_as_ms: 3000,
+            time_initial_message_displayed_after_channel_change: ClockTime::from_mseconds(3000),
             scroll: Scroll {
                 max_scroll: 14,         // we want to advance at most that many characters
                 min_scroll: 6,          //minimum ammount of a scroll
@@ -163,15 +180,6 @@ impl Config {
                 ));
             }
 
-            if let Some(playlist_prefix) = &return_value.aural_notifications.playlist_prefix
-                && !std::path::Path::new(playlist_prefix).exists()
-            {
-                return Err(format!(
-                    "playlist prefix file {} specified in TOML file but not found",
-                    playlist_prefix
-                ));
-            }
-
             if let Some(playlistfilename_sound_at_end_of_playlist) = &return_value
                 .aural_notifications
                 .filename_sound_at_end_of_playlist
@@ -184,23 +192,23 @@ impl Config {
             }
 
             if let Some(usb) = &return_value.usb
-                && !std::path::Path::new(&usb.local_mount_folder).exists()
+                && !std::path::Path::new(&usb.mount_folder).exists()
             {
                 return Err(format!(
                     "local USB mount folder {} specified in TOML file but not found",
-                    usb.local_mount_folder
+                    usb.mount_folder
                 ));
             }
             if let Some(samba) = &return_value.samba {
                 if let Some(usb) = &return_value.usb
-                    && samba.remote_mount_folder == usb.local_mount_folder
+                    && samba.mount_folder == usb.mount_folder
                 {
                     return Err("Mount folder for local & remote USB must be different".to_string());
                 }
-                if !std::path::Path::new(&samba.remote_mount_folder).exists() {
+                if !std::path::Path::new(&samba.mount_folder).exists() {
                     return Err(format!(
                         "Remote USB mount folder {} specified in TOML file but not found",
-                        samba.remote_mount_folder
+                        samba.mount_folder
                     ));
                 }
             }
@@ -210,6 +218,7 @@ impl Config {
     }
 }
 
+/// inserts the SAMBA details in the Samaba part of status_of_rradio
 pub fn insert_samba(config: &Config, status_of_rraadio: &mut PlayerStatus) {
     if let Some(samba) = &config.samba {
         let samba_clone = samba.clone();
@@ -217,20 +226,50 @@ pub fn insert_samba(config: &Config, status_of_rraadio: &mut PlayerStatus) {
             artist: String::new(),
             address_to_ping: String::new(),
             index_to_current_track: 0,
-            duration_ms: None,
-            position: chrono::Duration::zero(),
+            duration: None,
+            position: ClockTime::ZERO,
             channel_data: ChannelFileDataDecoded {
                 organisation: String::new(),
                 last_track_is_a_ding: true,
                 pause_before_playing_ms: None,
                 source_type: crate::get_channel_details::SourceType::Samba,
                 station_urls: vec![],
-                samba_details_all: Some(SambaDetailsAll {
+                media_details: Some(MediaDetails {
                     channel_number: samba.channel_number,
                     authentication_data: samba_clone.authentication_data,
                     version: samba_clone.version,
                     device: samba_clone.device,
-                    remote_mount_folder: samba_clone.remote_mount_folder,
+                    mount_folder: samba_clone.mount_folder,
+                    is_mounted: false,
+                }),
+            },
+        }
+    }
+}
+
+/// inserts the USB details in the USB part of status_of_rradio
+pub fn insert_usb(config: &Config, status_of_rraadio: &mut PlayerStatus) {
+    if let Some(usb) = &config.usb {
+        let usb_clone = usb.clone();
+        status_of_rraadio.position_and_duration[usb.channel_number] = RealTimeDataOnOneChannel {
+            artist: String::new(),
+            address_to_ping: String::new(),
+            index_to_current_track: 0,
+            duration: None,
+            position: ClockTime::ZERO,
+            channel_data: ChannelFileDataDecoded {
+                organisation: String::new(),
+                last_track_is_a_ding: true,
+                pause_before_playing_ms: None,
+                source_type: crate::get_channel_details::SourceType::Usb,
+                station_urls: vec![],
+                media_details: Some(MediaDetails {
+                    channel_number: usb.channel_number,
+                    authentication_data: None,
+                    version: None,
+                    device: usb_clone.device,
+                    mount_folder: usb_clone.mount_folder,
+                    is_mounted: false,
                 }),
             },
         }
@@ -273,13 +312,13 @@ filename_sound_at_end_of_playlist =  "/home/pi/sounds/KDE-Sys-App-Message.mp3"  
 [usb]
 channel_number = 99
 device= "/dev/sda1"
-local_mount_folder = "/home/pi/local_mount_folder"
+mount_folder = "/home/pi/local_mount_folder"
 
 [samba]
 channel_number = 88
 device = "//192.168.0.2/volume(sda1)"
 version = "1.0"
-remote_mount_folder = "/home/pi/88"
+mount_folder = "/home/pi/88"
 [samba.authentication_data]         # omit this entry if no  authentication data
 username = "the username"
 password = "the password"

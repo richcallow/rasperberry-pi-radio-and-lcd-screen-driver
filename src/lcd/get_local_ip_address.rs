@@ -1,6 +1,7 @@
+use crate::mount_media::mount_media;
+use crate::unmount_if_needed;
 use substring::Substring;
 
-use crate::{mount_usb::mount_usb, unmount::unmount_if_needed};
 #[derive(Debug)]
 /// if is_valid is true, contains the SSID, local & gateway IP addresses as strings.
 pub struct NetworkData {
@@ -102,23 +103,22 @@ pub fn set_up_wifi_password(
         .update_if_changed("Please wait maybe 20 seconds; trying to set new Wi-Fi password");
     lcd.write_rradio_status_to_lcd(status_of_rradio, config);
 
-    let mount_folder;
     let config_as_result;
 
-    if let Some(usb) = &config.usb {
-        mount_folder = &usb.local_mount_folder;
+    if let Some(usb_config) = &config.usb {
+        if let Some(mount_data) = &mut status_of_rradio.position_and_duration
+            [usb_config.channel_number]
+            .channel_data
+            .media_details
+            && let Err(error) = mount_media(mount_data)
+        {
+            return Err(format!(
+                "Wi-fi does not seem to be working and could not mount the memory stick to read the password file. Got error {:?}\r",
+                error
+            ));
+        };
 
-        match mount_usb(usb, status_of_rradio) {
-            Ok(()) => {}
-            Err(error_message) => {
-                return Err(format!(
-                    "Wi-fi does not seem to be working and could not mount the memory stick to read the password file. Got error {:?}\r",
-                    error_message
-                ));
-            }
-        }
-
-        let passfile = format!("{mount_folder}//pass.toml");
+        let passfile = format!("{}//pass.toml", &usb_config.mount_folder);
         if !std::path::Path::new(&passfile).exists() {
             return Err(format!(
                 "Wi-Fi does not seem to be working and cannot find the Wi-Fi password file {}",
@@ -134,16 +134,14 @@ pub fn set_up_wifi_password(
                 )
             });
         // next unmount the USB stick as we have read the file before any other errors might happen
-        if let Err(error_message) =
-            unmount_if_needed(&usb.local_mount_folder, &mut status_of_rradio.usb_mounted)
-        {
+        if let Err(error_message) = unmount_if_needed(
+            &mut status_of_rradio.position_and_duration[usb_config.channel_number],
+        ) {
             return Err(format!(
                 "When trying to unmount the USB stick after reading pass.toml got error {}",
                 error_message
             ));
-        } else {
-            status_of_rradio.usb_mounted = false; // we unmounted the USB stick OK
-        }
+        };
     } else {
         return Err(
             "USB must be specified in TOML file so the program can read the SSID etc".to_string(),

@@ -1,21 +1,31 @@
-/// unmounts whatever device is mounted in the mount folder; returns an error string if it fails
-pub fn unmount_if_needed(mount_path: &str, mount_flag: &mut bool) -> Result<(), String> {
-    println!("unmounting if needed {} \r", mount_path);
-    if *mount_flag {
-        println!("unmounting {}\r", mount_path);
-        if let Err(error_message) = sys_mount::unmount(mount_path, sys_mount::UnmountFlags::DETACH)
-        {
+use crate::player_status::RealTimeDataOnOneChannel;
+/// Unmounts whatever device is mounted in the mount folder; returns an error string if it fails
+pub fn unmount_if_needed(
+    real_time_data_one_channel: &mut RealTimeDataOnOneChannel,
+) -> Result<(), String> {
+    if let Some(data_one_channel) = &mut real_time_data_one_channel.channel_data.media_details {
+        if !data_one_channel.is_mounted {
+            return Ok(());
+        }
+        println!("unmounting {:?}\r", data_one_channel);
+        if let Err(error_message) = sys_mount::unmount(
+            &data_one_channel.mount_folder,
+            sys_mount::UnmountFlags::DETACH,
+        ) {
             eprintln!(
                 "Failed to unmount the device mounted on {}. Got error {:?}\r",
-                mount_path, error_message
+                data_one_channel.mount_folder, error_message
             );
             return Err(format!(
                 "Failed to unmount the device mounted on {}",
-                mount_path
+                data_one_channel.mount_folder
             ));
         } else {
-            *mount_flag = false;
+            data_one_channel.is_mounted = false;
         };
+
+        Ok(())
+    } else {
+        Ok(())
     }
-    Ok(())
 }

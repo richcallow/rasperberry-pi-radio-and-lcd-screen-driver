@@ -4,39 +4,35 @@
 #[cfg(not(unix))]
 compile_error!("You must compile this on linux");
 
-use chrono::TimeDelta;
+use std::task::Poll;
+
 use futures_util::StreamExt;
 use get_channel_details::{ChannelErrorEvents, SourceType};
 use gstreamer::{SeekFlags, prelude::ElementExtManual};
 use gstreamer_interfaces::PlaybinElement;
-use player_status::PlayerStatus;
 
 mod cd_functions;
-pub mod mount_samba;
-pub mod mount_usb;
-
-use std::task::Poll;
-
-use crate::{
-    get_channel_details::store_channel_details_and_implement_them,
-    lcd::get_local_ip_address,
-    ping::{get_ping_time, see_if_there_is_a_ping_response},
-    player_status::NUMBER_OF_POSSIBLE_CHANNELS,
-    unmount::unmount_if_needed,
-};
-use lcd::{RunningStatus, ScrollData, TextBuffer};
-
 mod get_channel_details;
 mod get_config_file_path;
 mod gstreamer_interfaces;
 mod keyboard;
 mod lcd;
+mod mount_media;
 mod ping;
 mod player_status;
 mod read_config;
 mod unmount;
+mod web;
 
-/*#[macro_export]
+use get_channel_details::store_channel_details_and_implement_them;
+use lcd::get_local_ip_address;
+use lcd::{RunningStatus, ScrollData};
+use ping::{get_ping_time, see_if_there_is_a_ping_response};
+use player_status::NUMBER_OF_POSSIBLE_CHANNELS;
+use player_status::PlayerStatus;
+use unmount::unmount_if_needed;
+
+#[macro_export]
 macro_rules! my_dbg {
     // NOTE: We cannot use `concat!` to make a static string as a format argument
     // of `eprintln!` because `file!` could contain a `{` or
@@ -59,13 +55,14 @@ macro_rules! my_dbg {
     ($($val:expr),+ $(,)?) => {
         ($($crate::my_dbg!($val)),+,)
     };
-}*/
+}
 
 /// An enum of all the types of event, each with their own event sub-type
 #[derive(Debug)]
 enum Event {
     Keyboard(keyboard::Event),
     GStreamer(gstreamer::Message),
+    Web(web::Event),
     Ticker(tokio::time::Instant),
 }
 
@@ -117,6 +114,8 @@ async fn main() -> Result<(), String> {
     }
 
     read_config::insert_samba(&config, &mut status_of_rradio);
+    read_config::insert_usb(&config, &mut status_of_rradio);
+
     // first assume that the WiFi is working and has a valid SSID & Password
     status_of_rradio.update_network_data(&mut lcd, &config);
 
@@ -153,7 +152,6 @@ async fn main() -> Result<(), String> {
 
     match gstreamer_interfaces::PlaybinElement::setup(&config) {
         Ok((mut playbin, bus_stream)) => {
-            /*println!("playbin{:?}    bus stream{:?}", playbin, bus_stream);  */
             if let Some(filename) = config.aural_notifications.filename_startup.clone() {
                 status_of_rradio.channel_number = player_status::START_UP_DING_CHANNEL_NUMBER;
 
@@ -189,12 +187,15 @@ async fn main() -> Result<(), String> {
                 &mut playbin,
             );
 
+            let (web_data_changed_tx, web_events) = web::start_server();
+
+            let mut mapped_web_events =
+                tokio_stream::wrappers::UnboundedReceiverStream::new(web_events).map(Event::Web);
+
             let mut some_timer = tokio_stream::wrappers::IntervalStream::new(
                 tokio::time::interval(std::time::Duration::from_millis(300)),
             )
             .map(Event::Ticker);
-
-            //let g= get_local_ip_address::set_up_wifi_password(&mut status_of_rradio, &mut lcd, &config);
 
             let mut child_ping = ping::send_ping(&mut status_of_rradio, &config);
 
@@ -212,26 +213,33 @@ async fn main() -> Result<(), String> {
                 }
 
                 let event = std::future::poll_fn(|cx| {
-                    //First poll the keyboard events source for keyboard events
+                    // First poll the keyboard events source for keyboard events
                     match mapped_keyboard_events.poll_next_unpin(cx) {
-                        //std::future::poll_fn strips off "Poll::Ready", so if there is a keyboard event, the next line becomes "event = keyboard_event"
+                        // std::future::poll_fn strips off "Poll::Ready", so if there is a keyboard event, the next line becomes "event = keyboard_event"
                         Poll::Ready(keyboard_event) => return Poll::Ready(keyboard_event),
                         Poll::Pending => (), //if the match gives Pending, which means that so far event has not been made equal to anything.
                     };
 
-                    //Then poll the GStreamer playbin events source for gstreamer events
+                    // Then poll the GStreamer playbin events source for gstreamer events
                     match mapped_playbin_message_bus.poll_next_unpin(cx) {
-                        //std::future::poll_fn strips off "Poll::Ready", so if there is a playbin event, the next line becomes "event = playbin_event"
+                        // std::future::poll_fn strips off "Poll::Ready", so if there is a playbin event, the next line becomes "event = playbin_event"
                         Poll::Ready(playbin_event) => return Poll::Ready(playbin_event),
                         Poll::Pending => (), //if the match gives Pending, which means that so far event has not been made equal to anything.
                     };
+
+                    // Then poll the web events source for web events
+                    match mapped_web_events.poll_next_unpin(cx) {
+                        // std::future::poll_fn strips off "Poll::Ready", so if there is a web event, the next line becomes "event = web_event"
+                        Poll::Ready(web_event) => return Poll::Ready(web_event),
+                        Poll::Pending => (), //if the match gives Pending, which means that so far event has not been made equal to anything.
+                    }
 
                     match some_timer.poll_next_unpin(cx) {
                         Poll::Ready(playbin_event) => return Poll::Ready(playbin_event),
                         Poll::Pending => (),
                     }
 
-                    //No event sources are ready, notify we're awaiting, i.e. pending, incoming events.
+                    // No event sources are ready, notify we're awaiting, i.e. pending, incoming events.
                     // poll_fn calls this code block the next time it's awoken, not in a CPU intensive tight loop.
                     Poll::Pending //this is the return value event is made equal to Poll::Pending.
                 })
@@ -241,26 +249,32 @@ async fn main() -> Result<(), String> {
                 match event {
                     None => {
                         // we are ending the program if we get to here
-                        if let Some(usb) = &config.usb
-                            && let Err(message) = &unmount_if_needed(
-                                &usb.local_mount_folder,
-                                &mut status_of_rradio.usb_mounted,
+                        if let Some(usb_config) = &config.usb
+                            && let Err(error) = unmount_if_needed(
+                                &mut status_of_rradio.position_and_duration
+                                    [usb_config.channel_number],
                             )
                         {
-                            eprintln!("Failed to unmount the local USB drive {}\r", message)
+                            eprintln!(
+                                "Failed to unmount local USB stick when ending program. got {}",
+                                error
+                            )
                         }
 
-                        if let Some(samba) = &config.samba
-                            && let Err(message) = &unmount_if_needed(
-                                &samba.remote_mount_folder,
-                                &mut status_of_rradio.samba_mounted,
+                        if let Some(samba_config) = &config.samba
+                            && let Err(error) = unmount_if_needed(
+                                &mut status_of_rradio.position_and_duration
+                                    [samba_config.channel_number],
                             )
                         {
-                            eprintln!("Failed to unmount the remote USB drive {}\r", message)
+                            eprintln!(
+                                "Failed to unmount Samba drive when ending program. got {}",
+                                error
+                            )
                         }
 
                         status_of_rradio.running_status = lcd::RunningStatus::ShuttingDown;
-                        lcd.clear(); // we are ending the program if we get to here
+                        lcd.clear();
                         lcd.write_rradio_status_to_lcd(&status_of_rradio, &config);
                         break; // if we get here, the program will terminate
                     } //One of the streams has closed, signalling a shutdown of the program, so break out of the main loop
@@ -309,7 +323,7 @@ async fn main() -> Result<(), String> {
                             if status_of_rradio.position_and_duration
                                 [status_of_rradio.channel_number]
                                 .position
-                                > TimeDelta::milliseconds(config.goto_previous_track_time_delta)
+                                > config.goto_previous_track_time_delta
                             {
                                 // We have been playing for some time, so seek the start of the track
                                 let _ = playbin.playbin_element.seek_simple(
@@ -454,7 +468,15 @@ async fn main() -> Result<(), String> {
                             }
                         }
                         keyboard::Event::OutputStatusDebug => {
-                            status_of_rradio.output_rradio();
+                            println!("\r");
+
+                            for line in status_of_rradio
+                                .generate_rradio_report()
+                                .expect("Formatting error while gererating report")
+                                .lines()
+                            {
+                                println!("{line}\r");
+                            }
                         }
                         keyboard::Event::OutputConfigDebug => {
                             status_of_rradio.output_config_information(&config);
@@ -574,24 +596,45 @@ async fn main() -> Result<(), String> {
                             _ => {}
                         }
                     }
+                    Some(Event::Web(web_event)) => match web_event {
+                        web::Event::RequestRRadioStatusReport { report_tx } => {
+                            if report_tx
+                                .send(status_of_rradio.generate_rradio_report())
+                                .is_err()
+                            {
+                                eprintln!("Failed to send RRadio Status Report to web worker\r");
+                            }
+                        }
+                        web::Event::UpdatePosition { position_ms } => {
+                            let _ = playbin.playbin_element.seek_simple(
+                                SeekFlags::FLUSH | SeekFlags::KEY_UNIT | SeekFlags::SNAP_NEAREST,
+                                gstreamer::ClockTime::from_mseconds(position_ms),
+                            );
+                        }
+                        unhandled_web_event @ (web::Event::ButtonPressed
+                        | web::Event::SliderMoved { .. }) => {
+                            my_dbg!(unhandled_web_event);
+                        }
+                    },
                     Some(Event::Ticker(_now)) => {
                         if status_of_rradio.channel_number
                             <= player_status::NUMBER_OF_POSSIBLE_CHANNELS
-                            && let Some(position_ms) = playbin
+                            && let Some(position) = playbin
                                 .playbin_element
                                 .query_position::<gstreamer::ClockTime>()
-                                .map(gstreamer::ClockTime::mseconds)
-                            && let Ok(position_i64) = i64::try_from(position_ms)
                         {
                             status_of_rradio.position_and_duration
                                 [status_of_rradio.channel_number]
-                                .position = TimeDelta::milliseconds(position_i64);
+                                .position = position;
+
+                            let duration = playbin.playbin_element.query_duration();
+
                             status_of_rradio.position_and_duration
                                 [status_of_rradio.channel_number]
-                                .duration_ms = playbin
-                                .playbin_element
-                                .query_duration()
-                                .map(gstreamer::ClockTime::mseconds);
+                                .duration = duration;
+
+                            let _ = web_data_changed_tx
+                                .send(web::DataChanged::Position { position, duration });
                         } // else if there is no position we cannot do anything useful
                     }
                 }

@@ -1,5 +1,7 @@
-use chrono::{Duration, Utc};
 use std::fs;
+
+use chrono::Utc;
+use gstreamer::ClockTime;
 
 use crate::{
     get_channel_details::{self, ChannelFileDataDecoded},
@@ -18,11 +20,11 @@ use crate::{
 pub struct RealTimeDataOnOneChannel {
     pub artist: String,
     pub index_to_current_track: usize,
-    pub position: Duration,
+    pub position: ClockTime,
     /// address_to_ping is derived from the first station in the list
     /// after stripping off the prefix & suffix
     pub address_to_ping: String,
-    pub duration_ms: Option<u64>,
+    pub duration: Option<ClockTime>,
     pub channel_data: ChannelFileDataDecoded,
 }
 impl RealTimeDataOnOneChannel {
@@ -31,8 +33,8 @@ impl RealTimeDataOnOneChannel {
             channel_data: get_channel_details::ChannelFileDataDecoded::new(),
             artist: String::new(),
             index_to_current_track: 0,
-            position: Duration::zero(),
-            duration_ms: None,
+            position: ClockTime::ZERO,
+            duration: None,
             address_to_ping: "8.8.8.8".to_string(), // a default value in case we do not find a valid address
         }
     }
@@ -61,10 +63,6 @@ pub struct PlayerStatus {
     pub buffering_percent: i32,
     /// stores SSID, local IP address & gateway address
     pub network_data: get_local_ip_address::NetworkData,
-    /// specifies if there is a local USB memory stick mounted
-    pub usb_mounted: bool,
-    /// specifies if there is a remote SAMBA mounted device
-    pub samba_mounted: bool,
     pub ping_data: ping::PingData,
     pub all_4lines: lcd::ScrollData,
     pub line_1_data: lcd::ScrollData,
@@ -92,8 +90,6 @@ impl PlayerStatus {
             current_volume: config.initial_volume,
             gstreamer_state: gstreamer::State::Null,
             buffering_percent: 0,
-            usb_mounted: false,
-            samba_mounted: false,
             network_data: NetworkData::new(),
             ping_data: ping::PingData::new(),
             time_started_playing_current_station: chrono::Utc::now(),
@@ -129,131 +125,129 @@ impl PlayerStatus {
         );
         println!("stations_directory\t\t{}\r", config.stations_directory);
         println!(
-            "time_initial_message_displayed_after_channel_change_as_ms\t{:?}\r",
-            config.time_initial_message_displayed_after_channel_change_as_ms
+            "time_initial_message_displayed_after_channel_change\t{}\r",
+            config.time_initial_message_displayed_after_channel_change
         );
         println!("usb\t\t\t\t{:?}\r", config.usb);
         println!("samba\t\t\t\t{:?}\r", config.samba);
         println!("volume_offset\t\t\t{}\r", config.volume_offset);
     }
 
-    /// outputs whether or not the amplifier is muted & the status information
-    pub fn output_rradio(&self) {
-        println!("\nstatus of rradio follows\r");
-        println!(
-            "Throttled_status\t{:?}\r",
-            lcd::get_throttled::is_throttled()
-        );
-        println!("mute state is \t\t{}\r", get_mute_state::get_mute_state());
-        println!("toml_error\t\t{:?}\r", self.toml_error);
-        println!("running_status\t\t{:?}\r", self.running_status);
-        println!("startup folder\t\t{}\r", self.startup_folder);
-        println!("channel_number\t\t{}\r", self.channel_number);
-        println!("current_volume\t\t{}\r", self.current_volume);
-        println!("gstreamer_state\t\t{:?}\r", self.gstreamer_state);
-        println!("buffering_percent\t{}\r", self.buffering_percent);
-        println!("network_data\t\t{:?}\r", self.network_data);
-        println!("USB mounted\t\t{:?}\r", self.usb_mounted);
-        println!("Samba mounted\t\t{:?}\r", self.samba_mounted);
-        println!("ping_data\t\t{:?}\r", self.ping_data);
-        println!("all_4lines\t\t{:?}\r", self.all_4lines);
-        println!("line_1_data\t\t{:?}\r", self.line_1_data);
-        println!("line_2_data\t\t{:?}\r", self.line_2_data);
-        println!("line_34_data\t\t{:?}\r", self.line_34_data);
-        println!(
-            "time_started_playing_current_station\t{}\r",
-            self.time_started_playing_current_station
-        );
+    /// reports whether or not the amplifier is muted & the status information
+    pub fn generate_rradio_report(&self) -> Result<String, std::fmt::Error> {
+        use std::fmt::Write;
+        let mut report = String::new();
 
-        println!("position_and_duration follow if there are any\r");
-        for channel_count in 0..self.position_and_duration.len() {
-            if (!self.position_and_duration[channel_count]
-                .channel_data
-                .station_urls
-                .is_empty())
-                | (channel_count == 88)
+        writeln!(report, "\nstatus of rradio follows")?;
+        writeln!(
+            report,
+            "Throttled_status\t{:?}",
+            lcd::get_throttled::is_throttled()
+        )?;
+        writeln!(
+            report,
+            "mute state is \t\t{}",
+            get_mute_state::get_mute_state()
+        )?;
+        writeln!(report, "toml_error\t\t{:?}", self.toml_error)?;
+        writeln!(report, "running_status\t\t{:?}", self.running_status)?;
+        writeln!(report, "startup folder\t\t{}", self.startup_folder)?;
+        writeln!(report, "channel_number\t\t{}", self.channel_number)?;
+        writeln!(report, "current_volume\t\t{}", self.current_volume)?;
+        writeln!(report, "gstreamer_state\t\t{:?}", self.gstreamer_state)?;
+        writeln!(report, "buffering_percent\t{}", self.buffering_percent)?;
+        writeln!(report, "network_data\t\t{:?}", self.network_data)?;
+        writeln!(report, "ping_data\t\t{:?}", self.ping_data)?;
+        writeln!(report, "all_4lines\t\t{:?}", self.all_4lines)?;
+        writeln!(report, "line_1_data\t\t{:?}", self.line_1_data)?;
+        writeln!(report, "line_2_data\t\t{:?}", self.line_2_data)?;
+        writeln!(report, "line_34_data\t\t{:?}", self.line_34_data)?;
+        writeln!(
+            report,
+            "time_started_playing_current_station\t{}",
+            self.time_started_playing_current_station
+        )?;
+
+        writeln!(report, "position_and_duration follow if there are any")?;
+        for (channel_count, channel_realtime_data) in self.position_and_duration.iter().enumerate()
+        {
+            if (!channel_realtime_data.channel_data.station_urls.is_empty())
+                | (channel_count == 99)
                 | (channel_count == self.channel_number)
             {
-                println!("channel_count {}\r", channel_count);
+                writeln!(report, "channel_count {}", channel_count)?;
 
-                println!(
-                    "\tchannel_data.organisation\t\t{:?}\r",
-                    self.position_and_duration[channel_count]
-                        .channel_data
-                        .organisation
-                );
-                println!(
-                    "\tchannel_data.source_type\t\t{:?}\r",
-                    self.position_and_duration[channel_count]
-                        .channel_data
-                        .source_type
-                );
-                println!(
-                    "\tchannel_data.last_track_is_a_ding\t{}\r",
-                    self.position_and_duration[channel_count]
-                        .channel_data
-                        .last_track_is_a_ding
-                );
-                println!(
-                    "\tchannel_data.pause_before_playing_ms\t{:?}\r",
-                    self.position_and_duration[channel_count]
-                        .channel_data
-                        .pause_before_playing_ms
-                );
-                println!(
-                    "\tchannel_data.samba_details\t\t{:?}\r",
-                    self.position_and_duration[channel_count]
-                        .channel_data
-                        .samba_details_all
-                );
-                println!(
-                    "\tartist\t\t\t{}\r",
-                    self.position_and_duration[channel_count].artist
-                );
+                writeln!(
+                    report,
+                    "\tchannel_data.organisation\t\t{:?}",
+                    channel_realtime_data.channel_data.organisation
+                )?;
+                writeln!(
+                    report,
+                    "\tchannel_data.source_type\t\t{:?}",
+                    channel_realtime_data.channel_data.source_type
+                )?;
+                writeln!(
+                    report,
+                    "\tchannel_data.last_track_is_a_ding\t{}",
+                    channel_realtime_data.channel_data.last_track_is_a_ding
+                )?;
+                writeln!(
+                    report,
+                    "\tchannel_data.pause_before_playing_ms\t{:?}",
+                    channel_realtime_data.channel_data.pause_before_playing_ms
+                )?;
+                writeln!(
+                    report,
+                    "\tchannel_data.media_details\t\t{:?}",
+                    channel_realtime_data.channel_data.media_details
+                )?;
+                writeln!(report, "\tartist\t\t\t{}", channel_realtime_data.artist)?;
 
-                println!(
-                    "\tindex_to_current_track\t{}\r",
-                    self.position_and_duration[channel_count].index_to_current_track
-                );
+                writeln!(
+                    report,
+                    "\tindex_to_current_track\t{}",
+                    channel_realtime_data.index_to_current_track
+                )?;
 
-                println!(
-                    "\taddress_to_ping\t\t{}\r",
-                    self.position_and_duration[channel_count].address_to_ping
-                );
+                writeln!(
+                    report,
+                    "\taddress_to_ping\t\t{}",
+                    channel_realtime_data.address_to_ping
+                )?;
 
-                println!(
-                    "\tposition\t\t{} s\r",
-                    self.position_and_duration[channel_count]
-                        .position
-                        .as_seconds_f32()
-                );
-                println!(
-                    "\tduration_ms\t\t{:?}\r",
-                    self.position_and_duration[channel_count].duration_ms
-                );
+                writeln!(
+                    report,
+                    "\tposition\t\t{} s",
+                    (channel_realtime_data.position.mseconds() as f32) / 1000.0
+                )?;
+                writeln!(
+                    report,
+                    "\tduration\t\t{:?} s",
+                    channel_realtime_data
+                        .duration
+                        .map(|duration| (duration.mseconds() as f32) / 1000.0)
+                )?;
 
-                println!("\n\tTrack information follows\r");
+                writeln!(report, "\n\tTrack information follows")?;
 
-                for track_count in 0..self.position_and_duration[channel_count]
+                for (track_count, station_url) in channel_realtime_data
                     .channel_data
                     .station_urls
-                    .len()
+                    .iter()
+                    .enumerate()
                 {
-                    println!(
-                        "\t{} {}\r",
-                        track_count,
-                        self.position_and_duration[channel_count]
-                            .channel_data
-                            .station_urls[track_count]
-                    )
+                    writeln!(report, "\t{} {}", track_count, station_url)?;
                 }
             }
         }
+
+        Ok(report)
     }
 
     pub fn output_mount_folder_contents(&self, config: &Config) {
         if let Some(usb) = &config.usb {
-            let mount_folder = &usb.local_mount_folder;
+            let mount_folder = &usb.mount_folder;
             match fs::read_dir(mount_folder) {
                 Ok(audio_files) => {
                     println!("folder {:?}\r", audio_files);
@@ -266,10 +260,10 @@ impl PlayerStatus {
                 }
             }
         } else {
-            println!("no USB data")
+            println!("no USB data\r")
         }
         if let Some(samba) = &config.samba {
-            let mount_folder = &samba.remote_mount_folder;
+            let mount_folder = &samba.mount_folder;
             match fs::read_dir(mount_folder) {
                 Ok(audio_files) => {
                     println!("folder {:?}\r", audio_files);
@@ -282,7 +276,7 @@ impl PlayerStatus {
                 }
             }
         } else {
-            println!("no samba data")
+            println!("no samba data\r")
         }
     }
 
@@ -293,7 +287,7 @@ impl PlayerStatus {
         &mut self,
         lcd: &mut crate::lcd::Lc,
         config: &crate::read_config::Config,
-    ) {      
+    ) {
         self.running_status = RunningStatus::LongMessageOnAll4Lines;
         for count in 0..40 {
             // go round the loop multiple times looking for the IP address

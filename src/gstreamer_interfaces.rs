@@ -1,10 +1,9 @@
 use crate::lcd::{LineNum, TextBuffer};
 use crate::unmount::unmount_if_needed;
-use crate::{PlayerStatus, mount_samba};
+use crate::{PlayerStatus, mount_media, my_dbg};
 use crate::{
     get_channel_details::SourceType,
     lcd::RunningStatus,
-    mount_usb::mount_usb,
     player_status::{self},
 };
 use glib::object::{Cast, ObjectExt};
@@ -25,39 +24,6 @@ pub const VOLUME_MAX: i32 = 120;
 /// The interface used to connect to gstreamer
 pub struct PlaybinElement {
     pub playbin_element: gstreamer::Element,
-}
-
-fn mount_usb_if_necessary(
-    status_of_rradio: &mut PlayerStatus,
-    config: &crate::read_config::Config,
-) -> Result<(), String> {
-    if let Some(usb) = &config.usb
-        && usb.channel_number == status_of_rradio.channel_number
-        && !status_of_rradio.usb_mounted
-    {
-        //we must mount the usb device
-        if let Err(error) = mount_usb(usb, status_of_rradio) {
-            return Err(error.to_lcd_screen());
-        }
-    }
-
-    Ok(())
-}
-
-fn mount_samba_if_necessary(
-    status_of_rradio: &mut PlayerStatus,
-    config: &crate::read_config::Config,
-) -> Result<(), String> {
-    if let Some(samba) = &config.samba
-        && samba.channel_number == status_of_rradio.channel_number
-        && !status_of_rradio.samba_mounted
-    {
-        //we must mount the samba device
-        if let Err(error) = mount_samba::mount_samba(status_of_rradio) {
-            return Err(error.to_lcd_screen());
-        }
-    }
-    Ok(())
 }
 
 impl std::ops::Drop for PlaybinElement {
@@ -170,21 +136,29 @@ impl PlaybinElement {
         lcd: &mut crate::lcd::Lc,
         seek_wanted_if_possible: bool,
     ) -> Result<(), String> {
-        mount_usb_if_necessary(status_of_rradio, config)?; // returns the error value that mount_usb_if_necessary if mount_usb_if_necessary returns 
-
-        if let Some(usb) = &config.usb
-            && usb.channel_number != status_of_rradio.channel_number
-            && let Err(error) =
-                unmount_if_needed(&usb.local_mount_folder, &mut status_of_rradio.usb_mounted)
+        if status_of_rradio.running_status != RunningStatus::Startingup
+            && let Err(error) = mount_media::mount_media_for_current_channel(status_of_rradio)
         {
-            eprintln!(
-                "when unmounting USB stick as it was not being used, got error {}\r",
-                error
-            )
+            return Err(error.to_lcd_screen());
         }
 
-        mount_samba_if_necessary(status_of_rradio, config)?;
+        //if USB is not in use, unmount it, so user can unplug it
+        if let Some(usb_config) = &config.usb
+            && status_of_rradio.position_and_duration[status_of_rradio.channel_number]
+                .channel_data
+                .source_type
+                != SourceType::Usb
+            && let Err(error_message) = unmount_if_needed(
+                &mut status_of_rradio.position_and_duration[usb_config.channel_number],
+            )
+        {
+            return Err(format!(
+                "When unmounting USB stick as it was not being used, got error {}",
+                error_message
+            ));
+        };
 
+        // we must stop gsteamer before we can change it
         if let Err(error) = self.set_state(gstreamer::State::Null) {
             return Err(format!(
                 "Failed to set gstreamer to Null; got error {}",
@@ -192,7 +166,7 @@ impl PlaybinElement {
             ));
         }
 
-        // next we might have to play a ding, but before we try, check that one has been specified
+        // see if we need to play an error ding, but one has not been specified
         match status_of_rradio.running_status {
             RunningStatus::NoChannel
             | RunningStatus::NoChannelRepeated
@@ -203,6 +177,7 @@ impl PlaybinElement {
             } // return without playing as we ought to play a ding, but one has not been specified
             _ => {}
         }
+        // next we might have to play a startup ding, but before we try, check that one has been specified
         if (status_of_rradio.channel_number == player_status::START_UP_DING_CHANNEL_NUMBER)
             && (status_of_rradio.position_and_duration[player_status::START_UP_DING_CHANNEL_NUMBER]
                 .channel_data
@@ -294,11 +269,8 @@ impl PlaybinElement {
                         .source_type
                     {
                         SourceType::Cd | SourceType::Usb | SourceType::Samba => {
-                            let seek_time = gstreamer::ClockTime::from_seconds(
-                                status_of_rradio.position_and_duration[channel_number]
-                                    .position
-                                    .num_seconds() as u64,
-                            ); // the position we will seek to in the units needed.
+                            let seek_time =
+                                status_of_rradio.position_and_duration[channel_number].position; // the position we will seek to in the units needed.
                             // we use seconds as the unit as that is directly avaialble AND without an "Option"
                             let mut can_seek = false; // note we cannot perform a gstreamer seek yet 
 

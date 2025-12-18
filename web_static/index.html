@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Demo Page</title>
+    <link rel="stylesheet" href="index.css">
+    <script src="htmx.js"></script>
+    <script src="htmx-ext-sse.js"></script>
+    <script src="index.js"></script>
+</head>
+
+<body>
+    <h1>A Page</h1>
+
+    <p>This is content</p>
+
+    <!-- When you click the button, send a POST request to "button-press" and ignore the response -->
+    <button hx-post="/api/button-press" hx-swap="none">Click Here</button>
+
+    <!-- When move the slider, send a POST request to "slider-move" and insert the contents of the response (i.e. what's inside the root element) in the next "output" -->
+    <input type="range" name="value" min="0" max="100" hx-post="/api/slider-move" hx-target="next output">
+    <output></output>
+
+    <div hx-ext="sse" sse-connect="/api/test-events">
+        <div sse-swap="position-changed">INIT</div>
+    </div>
+</body>
+
+</html>

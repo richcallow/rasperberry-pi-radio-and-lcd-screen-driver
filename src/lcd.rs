@@ -505,8 +505,7 @@ impl Lc {
         // if the position is less than x seconds, we display the media type
         let start_line1 = if status_of_rradio.position_and_duration[status_of_rradio.channel_number]
             .position
-            .num_milliseconds()
-            < config.time_initial_message_displayed_after_channel_change_as_ms
+            < config.time_initial_message_displayed_after_channel_change
         {
             //state for the first few seconds follows
             match status_of_rradio.position_and_duration[status_of_rradio.channel_number]
@@ -528,12 +527,12 @@ impl Lc {
                     let position_secs = status_of_rradio.position_and_duration
                         [status_of_rradio.channel_number]
                         .position
-                        .num_seconds();
-                    if let Some(duration_ms) = status_of_rradio.position_and_duration
+                        .seconds();
+                    if let Some(duration) = status_of_rradio.position_and_duration
                         [status_of_rradio.channel_number]
-                        .duration_ms
+                        .duration
                     {
-                        let duration_secs = duration_ms / 1000;
+                        let duration_secs = duration.seconds();
                         let track_index = status_of_rradio.position_and_duration
                             [status_of_rradio.channel_number]
                             .index_to_current_track
