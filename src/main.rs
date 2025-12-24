@@ -8,6 +8,7 @@ use std::task::Poll;
 
 use futures_util::StreamExt;
 use get_channel_details::{ChannelErrorEvents, SourceType};
+use gstreamer::ClockTime;
 use gstreamer::{SeekFlags, prelude::ElementExtManual};
 use gstreamer_interfaces::PlaybinElement;
 
@@ -48,7 +49,7 @@ macro_rules! my_dbg {
             tmp => {
                 std::eprintln!("[{}:{}:{}] {} = {:?}\r",
                 std::file!(), std::line!(), std::column!(), std::stringify!($val), &tmp);
-                tmp
+
             }
         }
     };
@@ -180,12 +181,6 @@ async fn main() -> Result<(), String> {
             //This is needed for the loop statement that follows.
             let mut mapped_keyboard_events = keyboard_events.map(Event::Keyboard);
             let mut mapped_playbin_message_bus = bus_stream.map(Event::GStreamer);
-            change_volume(
-                0, // if direction == 0 it gets the volume, but does not change it
-                &config,
-                &mut status_of_rradio,
-                &mut playbin,
-            );
 
             let (web_data_changed_tx, web_events) = web::start_server();
 
@@ -197,8 +192,20 @@ async fn main() -> Result<(), String> {
             )
             .map(Event::Ticker);
 
+            change_volume(
+                0, // if direction == 0 it gets the volume, but does not change it
+                &config,
+                &mut status_of_rradio,
+                &mut playbin,
+                &web_data_changed_tx,
+            );
+
             let mut child_ping = ping::send_ping(&mut status_of_rradio, &config);
 
+            if let Some(toml_error) = status_of_rradio.toml_error {
+                status_of_rradio.line_1_data.update_if_changed(&toml_error); // convert to be a scrollable message
+                status_of_rradio.toml_error = None;
+            }
             loop {
                 if status_of_rradio.ping_data.can_send_ping {
                     //we must get the output
@@ -296,7 +303,13 @@ async fn main() -> Result<(), String> {
                             eprintln!("eject result {:?}\r", cd_functions::eject());
                         }
                         keyboard::Event::VolumeUp => {
-                            change_volume(1, &config, &mut status_of_rradio, &mut playbin);
+                            change_volume(
+                                1,
+                                &config,
+                                &mut status_of_rradio,
+                                &mut playbin,
+                                &web_data_changed_tx,
+                            );
                             status_of_rradio.line_1_data.update_if_changed(
                                 format!(
                                     "{} {}",
@@ -307,7 +320,13 @@ async fn main() -> Result<(), String> {
                             );
                         }
                         keyboard::Event::VolumeDown => {
-                            change_volume(-1, &config, &mut status_of_rradio, &mut playbin);
+                            change_volume(
+                                -1,
+                                &config,
+                                &mut status_of_rradio,
+                                &mut playbin,
+                                &web_data_changed_tx,
+                            );
                             status_of_rradio.line_1_data.update_if_changed(
                                 format!(
                                     "{} {}",
@@ -318,7 +337,6 @@ async fn main() -> Result<(), String> {
                             );
                         }
                         keyboard::Event::PreviousTrack => {
-                            println!("PreviousTrack\r");
                             status_of_rradio.initialise_for_new_station();
                             if status_of_rradio.position_and_duration
                                 [status_of_rradio.channel_number]
@@ -386,6 +404,9 @@ async fn main() -> Result<(), String> {
                                 status_of_rradio.running_status = RunningStatus::NoChannelRepeated;
                             } else {
                                 status_of_rradio.running_status = RunningStatus::RunningNormally;
+                                status_of_rradio.position_and_duration
+                                    [status_of_rradio.channel_number]
+                                    .position = ClockTime::ZERO;
                                 status_of_rradio.line_2_data.update_if_changed("");
                                 status_of_rradio.line_34_data.update_if_changed("");
                                 status_of_rradio.all_4lines.update_if_changed("");
@@ -484,6 +505,7 @@ async fn main() -> Result<(), String> {
                         keyboard::Event::OutputMountFolderContents => {
                             status_of_rradio.output_mount_folder_contents(&config)
                         }
+                        keyboard::Event::NewLineOnScreen => println!("\r"), // output a blank line on the screen to aid debugging clarity
                     },
 
                     Some(Event::GStreamer(gstreamer_message)) => {
@@ -561,7 +583,13 @@ async fn main() -> Result<(), String> {
                                     // we only want stage changes from playbin0
                                 }) {
                                     status_of_rradio.gstreamer_state = state_changed.current();
-                                    change_volume(0, &config, &mut status_of_rradio, &mut playbin);
+                                    change_volume(
+                                        0,
+                                        &config,
+                                        &mut status_of_rradio,
+                                        &mut playbin,
+                                        &web_data_changed_tx,
+                                    );
                                 }
                             }
 
@@ -605,14 +633,27 @@ async fn main() -> Result<(), String> {
                                 eprintln!("Failed to send RRadio Status Report to web worker\r");
                             }
                         }
+                        web::Event::VolumeDownPressed => change_volume(
+                            -1,
+                            &config,
+                            &mut status_of_rradio,
+                            &mut playbin,
+                            &web_data_changed_tx,
+                        ),
+                        web::Event::VolumeUpPressed => change_volume(
+                            1,
+                            &config,
+                            &mut status_of_rradio,
+                            &mut playbin,
+                            &web_data_changed_tx,
+                        ),
                         web::Event::UpdatePosition { position_ms } => {
                             let _ = playbin.playbin_element.seek_simple(
                                 SeekFlags::FLUSH | SeekFlags::KEY_UNIT | SeekFlags::SNAP_NEAREST,
                                 gstreamer::ClockTime::from_mseconds(position_ms),
                             );
                         }
-                        unhandled_web_event @ (web::Event::ButtonPressed
-                        | web::Event::SliderMoved { .. }) => {
+                        unhandled_web_event @ web::Event::SliderMoved { .. } => {
                             my_dbg!(unhandled_web_event);
                         }
                     },
@@ -641,6 +682,7 @@ async fn main() -> Result<(), String> {
                 status_of_rradio
                     .line_1_data
                     .update_scroll(&config, lcd::NUM_CHARACTERS_PER_LINE);
+
                 status_of_rradio
                     .line_2_data
                     .update_scroll(&config, lcd::NUM_CHARACTERS_PER_LINE);
@@ -784,6 +826,7 @@ fn change_volume(
     config: &read_config::Config,
     status_of_rradio: &mut player_status::PlayerStatus,
     playbin: &mut PlaybinElement,
+    data_changed_tx: &tokio::sync::broadcast::Sender<web::DataChanged>,
 ) {
     assert!(
         (direction == 1) || (direction == -1) || (direction == 0),
@@ -797,4 +840,6 @@ fn change_volume(
     if let Err(error_message) = playbin.set_volume(status_of_rradio.current_volume) {
         eprintln!("When changing the volume got error {}\r", error_message);
     }
+
+    let _ = data_changed_tx.send(web::DataChanged::Volume(status_of_rradio.current_volume));
 }

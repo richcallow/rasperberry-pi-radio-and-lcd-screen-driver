@@ -25,8 +25,8 @@ pub struct ChannelFileDataFromTOML {
     pub pause_before_playing_ms: Option<u64>,
     /// What to play       eg       station_url = "https://dc1.serverse.com/proxy/wiupfvnu?mp=/TradCan\"
     pub station_url: Vec<String>,
-    /// typically /dev/sda1 or None
-    pub playlist_device: Option<String>,
+
+    pub media_details: Option<MediaDetails>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -105,9 +105,6 @@ pub enum ChannelErrorEvents {
 
     /// Could not find the album specifed in the play list, possibly because the wrong memory stick is inserted
     CouldNotFindAlbum(String),
-
-    /// no USB device, but one was requested.
-    NoUSBDeviceSpecifiedInConfigTomlFile,
 
     /// No USBDevice
     NoUSBDevice,
@@ -194,10 +191,6 @@ impl ChannelErrorEvents {
                     "When trying to read USB memory stick got error {}",
                     error_message
                 )
-            }
-
-            ChannelErrorEvents::NoUSBDeviceSpecifiedInConfigTomlFile => {
-                "No remote or local USB device but one was requested".to_string()
             }
 
             ChannelErrorEvents::FailedToOpenCdDrive(error_as_option) => {
@@ -501,8 +494,8 @@ pub fn get_cd_details(
     })
 }
 
-/// updates status_of_rradio with the new channel data,
-/// unless previous_channel_number == status_of_rradio.channel_number != previous_channel_number AND data has already been got for the channel
+/// Updates status_of_rradio with the new channel data,
+/// if status_of_rradio.channel_number == previous_channel_number OR no data has been got yet for the channel
 pub fn store_channel_details_and_implement_them(
     config: &crate::read_config::Config,
     status_of_rradio: &mut PlayerStatus,
@@ -514,7 +507,7 @@ pub fn store_channel_details_and_implement_them(
         Ok(new_channel_file_data) => {
             status_of_rradio.toml_error = None;
 
-            // next work out address to ping & store it
+            // Work out address to ping & store it
             let mut source_address = new_channel_file_data.station_urls[0].clone();
             if let Some(position_double_slash) = source_address.find("//") {
                 let mut address_to_ping = source_address
@@ -532,9 +525,17 @@ pub fn store_channel_details_and_implement_them(
                 status_of_rradio.position_and_duration[status_of_rradio.channel_number]
                     .address_to_ping = address_to_ping;
             }
-            // set  organisation,  station_urls, source_type,  last_track_is_a_ding
-            status_of_rradio.position_and_duration[status_of_rradio.channel_number].channel_data =
-                new_channel_file_data;
+            if status_of_rradio.channel_number == previous_channel_number
+                || status_of_rradio.position_and_duration[status_of_rradio.channel_number]
+                    .channel_data
+                    .station_urls
+                    .is_empty()
+            {
+                // Either the user wants a new search, or this is the first time & there is no data.
+                // so, set  organisation,  station_urls, source_type,  last_track_is_a_ding
+                status_of_rradio.position_and_duration[status_of_rradio.channel_number]
+                    .channel_data = new_channel_file_data;
+            }
             Ok(())
         }
         Err(get_channel_details_error) => {
@@ -630,15 +631,16 @@ fn get_channel_details(
 
                 let toml_result: Result<ChannelFileDataFromTOML, toml::de::Error> =
                     toml::from_str(channel_file_info.trim_ascii_end());
-                let channel_toml_data = toml_result.map_err(|toml_error| {
-                    ChannelErrorEvents::CouldNotParseChannelFile {
-                        channel_number: status_of_rradio.channel_number,
-                        error_message: toml_error.to_string(),
-                    }
-                })?;
 
+                let channel_toml_data: ChannelFileDataFromTOML =
+                    toml_result.map_err(|toml_error| {
+                        ChannelErrorEvents::CouldNotParseChannelFile {
+                            channel_number: status_of_rradio.channel_number,
+                            error_message: toml_error.to_string(),
+                        }
+                    })?;
                 // at this point, the channel_toml_data is the data from the channel file
-                if channel_toml_data.playlist_device.is_some() {
+                if channel_toml_data.media_details.is_some() {
                     return set_up_playlist(channel_toml_data, config, &mut *status_of_rradio);
                 // it is a playlist, not a simple USB system
                 } else if channel_toml_data.station_url.is_empty() {
@@ -653,7 +655,11 @@ fn get_channel_details(
                         source_type: SourceType::UrlList,
                         last_track_is_a_ding: false,
                         pause_before_playing_ms: channel_toml_data.pause_before_playing_ms,
-                        media_details: None,
+                        media_details: status_of_rradio.position_and_duration
+                            [status_of_rradio.channel_number]
+                            .channel_data
+                            .media_details
+                            .clone(),
                     });
                 };
             }
@@ -673,40 +679,34 @@ fn set_up_playlist(
         return Err(ChannelErrorEvents::NoFilesInArray);
     }
 
-    let playlist_device;
-    if let Some(device) = toml_data.playlist_device {
-        playlist_device = device;
+    let media_detailsww;
+    if let Some(media_detailsx) = toml_data.media_details {
+        media_detailsww = media_detailsx
     } else {
-        return Err(ChannelErrorEvents::NoUSBDevice);
-    };
-    if playlist_device.starts_with("//") {
-        status_of_rradio.position_and_duration[status_of_rradio.channel_number]
-            .channel_data
-            .source_type = SourceType::Samba
-    } else if playlist_device.starts_with("/") {
+        return Err(ChannelErrorEvents::MediaNotSpecifiedInTomlfile);
+    }
+
+    if media_detailsww.device.starts_with("/") {
         status_of_rradio.position_and_duration[status_of_rradio.channel_number]
             .channel_data
             .source_type = SourceType::Usb
     }
-
     status_of_rradio.position_and_duration[status_of_rradio.channel_number]
         .channel_data
-        .media_details = Some(MediaDetails {
-        channel_number: status_of_rradio.channel_number,
-        device: "/dev/sda1".to_string(),
-        mount_folder: "/home/pi/remote_mount_folder".to_string(),
-        is_mounted: false,
-        version: None,
-        authentication_data: None,
-    });
+        .media_details = Some(media_detailsww); /*Some(MediaDetails {
+    channel_number: status_of_rradio.channel_number,
+    device: media_detailsww.device,
+    mount_folder: media_detailsww.mount_folder,
+    is_mounted: false,
+    version: media_detailsww.version,
+    authentication_data: media_detailsww.authentication_data,
+    })*/
 
-    //if let Some(usb_details) = &config.usb {
     match mount_media_for_current_channel(status_of_rradio) {
         Ok(mount_folder) => {
             let chosen_album = toml_data.station_url
                 [rand::random_range(0..(toml_data.station_url.len()))]
             .as_str();
-
             let chosen_album_and_path = format!("{}/{}", mount_folder, chosen_album);
 
             match fs::read_dir(&chosen_album_and_path) {
@@ -753,10 +753,18 @@ fn set_up_playlist(
                     Ok(ChannelFileDataDecoded {
                         organisation: format!("{}/{}", chosen_album, toml_data.organisation),
                         station_urls: list_of_audio_album_images,
-                        source_type: SourceType::Usb,
+                        source_type: status_of_rradio.position_and_duration
+                            [status_of_rradio.channel_number]
+                            .channel_data
+                            .source_type
+                            .clone(),
                         last_track_is_a_ding,
                         pause_before_playing_ms: toml_data.pause_before_playing_ms,
-                        media_details: None,
+                        media_details: status_of_rradio.position_and_duration
+                            [status_of_rradio.channel_number]
+                            .channel_data
+                            .media_details
+                            .clone(),
                     })
                 }
                 Err(error_message) => {
@@ -777,7 +785,4 @@ fn set_up_playlist(
         }
         Err(mount_error) => Err(mount_error), // return the error returned by the mount function
     }
-    //} else {
-    //    Err(ChannelErrorEvents::NoUSBDeviceSpecifiedInConfigTomlFile)
-    //}
 }

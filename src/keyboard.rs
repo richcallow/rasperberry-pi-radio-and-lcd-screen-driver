@@ -14,7 +14,8 @@ pub enum Event {
     NextTrack,
     OutputStatusDebug,                     // output the status of rradio
     OutputConfigDebug,                     // output the config info
-    OutputMountFolderContents,              // output the contents of the mount folders
+    OutputMountFolderContents,             // output the contents of the mount folders
+    NewLineOnScreen,                       // output a blank line on the screen 
     PlayStation { channel_number: usize }, // channel_number will be  in the range "00" to "99", giving us the number of the station to play
 }
 
@@ -63,6 +64,8 @@ pub fn setup_keyboard(
                             crossterm::event::KeyCode::Char('!') => Event::OutputStatusDebug,
                             crossterm::event::KeyCode::Char('£') => Event::OutputConfigDebug,
                             crossterm::event::KeyCode::Char('$') => Event::OutputMountFolderContents,
+                              crossterm::event::KeyCode::Char('^') => Event::NewLineOnScreen,
+                         
                             
                             crossterm::event::KeyCode::Char(current_digit @ '0'..='9') => {
                                 //the "@" symbol means make current_digit equal to the character that matched

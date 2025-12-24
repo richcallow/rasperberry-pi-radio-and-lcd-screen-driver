@@ -11,19 +11,26 @@
     <script src="index.js"></script>
 </head>
 
-<body>
+<body hx-ext="sse" sse-connect="/api/test-events">
     <h1>A Page</h1>
 
     <p>This is content</p>
 
-    <!-- When you click the button, send a POST request to "button-press" and ignore the response -->
-    <button hx-post="/api/button-press" hx-swap="none">Click Here</button>
+    <div>
+        <!-- When you click the volume down button, send a POST request to "volume-down" and ignore the response -->
+        <button hx-post="/api/volume-down" hx-swap="none">Volume down</button>
+        <span sse-swap="volume-changed">INIT VOLUME</span>
+        <!-- When you click the volume up button, send a POST request to "volume-up" and ignore the response -->
+        <button hx-post="/api/volume-up" hx-swap="none">Volume up</button>
+    </div>
 
-    <!-- When move the slider, send a POST request to "slider-move" and insert the contents of the response (i.e. what's inside the root element) in the next "output" -->
-    <input type="range" name="value" min="0" max="100" hx-post="/api/slider-move" hx-target="next output">
-    <output></output>
+    <div>
+        <!-- When move the slider, send a POST request to "slider-move" and insert the contents of the response (i.e. what's inside the root element) in the next "output" -->
+        <input type="range" name="value" min="0" max="100" hx-post="/api/slider-move" hx-target="next output">
+        <output></output>
+    </div>
 
-    <div hx-ext="sse" sse-connect="/api/test-events">
+    <div>
         <div sse-swap="position-changed">INIT</div>
     </div>
 </body>

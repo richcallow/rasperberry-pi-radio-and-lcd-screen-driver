@@ -19,7 +19,6 @@ struct SliderValue {
 /// An enum of all the events/commands received from client side
 #[derive(Debug)]
 pub enum Event {
-    ButtonPressed,
     SliderMoved {
         value: i32,
     },
@@ -28,6 +27,8 @@ pub enum Event {
     RequestRRadioStatusReport {
         report_tx: oneshot::Sender<Result<String, std::fmt::Error>>,
     },
+    VolumeDownPressed,
+    VolumeUpPressed,
     /// client side wants to set the play position to the given value
     UpdatePosition {
         position_ms: u64,
@@ -37,6 +38,8 @@ pub enum Event {
 /// Real-time information as sent to client.
 #[derive(Clone)]
 pub enum DataChanged {
+    /// gstreamer volume
+    Volume(i32),
     /// Position & Duration as sent to client
     Position {
         position: ClockTime,
@@ -146,6 +149,16 @@ fn render_test_events_data_changed(
     use maud::Render;
 
     Ok(match data_changed {
+        DataChanged::Volume(volume) => {
+            // Create the SSE Event which will be returned (inside OK(...))
+            axum::response::sse::Event::default()
+                .event("volume-changed")
+                .data(
+                    maud::html!(span { "Volume:" (volume) })
+                        .render()
+                        .into_string(),
+                )
+        }
         DataChanged::Position { position, duration } => {
             let data = match duration {
                 Some(duration) => maud::html! {
@@ -226,9 +239,15 @@ pub fn start_server() -> (
                 }),
             )
             .route(
-                "/button-press",
+                "/volume-down",
                 post(async |EventsTx { events_tx }| {
-                    _ = events_tx.send(Event::ButtonPressed);
+                    _ = events_tx.send(Event::VolumeDownPressed);
+                }),
+            )
+            .route(
+                "/volume-up",
+                post(async |EventsTx { events_tx }| {
+                    _ = events_tx.send(Event::VolumeUpPressed);
                 }),
             )
             .route(
@@ -240,7 +259,7 @@ pub fn start_server() -> (
                         // Generate a HTML snippet using a templating engine, see https://maud.lambda.xyz/
                         maud::html! {
                             div {
-                                "Slider position: " (value)
+                                "Slider position: does not do anything currently" (value)
                             }
                         }
                     },

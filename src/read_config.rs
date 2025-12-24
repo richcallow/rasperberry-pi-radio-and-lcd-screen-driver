@@ -2,6 +2,7 @@
 use std::time::Duration;
 
 use gstreamer::ClockTime;
+use string_replace_all::StringReplaceAll;
 
 use crate::{
     get_channel_details::ChannelFileDataDecoded,
@@ -163,10 +164,16 @@ impl Config {
 
         let return_value_as_result: Result<Config, String> = toml::from_str(&config_as_string)
             .map_err(|toml_file_parse_error| {
-                format!(
-                    "{} couldn't parse {config_file_path:?} Got {toml_file_parse_error}",
-                    env!("CARGO_PKG_NAME")
-                )
+                let error = toml_file_parse_error
+                    .to_string()
+                    .replace("\n", " ") // cannot handle new lines, so turn into spaces
+                    .replace("|", " ") // not very meaningful, so turn into spaces
+                    .replace("^", " ") // not very meaningful, so turn into spaces
+                    .replace_all("  ", " ")
+                    .replace_all("  ", " ")
+                    .replace_all("  ", " ");
+
+                format!("Using file {config_file_path:?} got {error}")
             });
 
         //now verify that the specified files exist
@@ -350,6 +357,6 @@ station_url = [
 "artist name2/disk name2",
 ]
 
-playlist_device = "/dev/sda1"
+device = "/dev/sda1"
 
 */

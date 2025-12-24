@@ -11,9 +11,7 @@ use std::{
 };
 
 use crate::{
-    get_channel_details::{self, SourceType},
-    ping::PingTimeAndDestination,
-    player_status,
+    get_channel_details::{self, SourceType}, my_dbg, ping::PingTimeAndDestination, player_status
 };
 use anyhow::Context;
 use substring::Substring;
@@ -396,7 +394,7 @@ impl Lc {
         let lcd_file = std::fs::File::options()
             .write(true)
             .open("/dev/lcd")
-            .context("rrrFailed to open LCD file. Are you running with root privilege")?;
+            .context("Failed to open LCD file. Are you running with root privilege")?;
 
         Self::clear_screen(&lcd_file);
         Ok(Lc { lcd_file })
@@ -413,7 +411,7 @@ impl Lc {
         status_of_rradio: &player_status::PlayerStatus,
         config: &crate::read_config::Config,
     ) {
-        if let Some(toml_error) = &status_of_rradio.toml_error {
+        if let Some(toml_error) = status_of_rradio.toml_error.clone() {          
             let mut text_buffer = TextBuffer::new();
             text_buffer.write_text_to_lines(toml_error.bytes(), LineNum::Line1, 4);
             self.write_text_buffer_to_lcd(&text_buffer);
@@ -479,7 +477,7 @@ impl Lc {
             Lc::format_ping_time(&status_of_rradio.ping_data.ping_time_and_destination, true)
         } else {
             "".to_string()
-        }; // it is too early to have got a response so shown nothing
+        }; // it is too early to have got a response so show nothing
 
         text_buffer.write_text_to_single_line(ping_message.bytes(), LineNum::Line2);
 
@@ -513,8 +511,28 @@ impl Lc {
                 .source_type
             {
                 SourceType::Cd => "Playing CD".to_string(),
-                SourceType::Usb => format!("Local USB {}", status_of_rradio.channel_number),
-                SourceType::Samba => format!("Remote USB {}", status_of_rradio.channel_number),
+                SourceType::Usb => 
+                {
+                    if let Some(media_details) = &status_of_rradio.position_and_duration[status_of_rradio.channel_number].channel_data.media_details {
+                        format!("{}{}", 
+                        if media_details.device.starts_with("//") {"Remote USB "} else {"Local USB "},
+                         status_of_rradio.channel_number,)
+                    }
+                    else {format!("Unknown type {}", status_of_rradio.channel_number)}
+                }
+                 SourceType::Samba => 
+                {
+                    if let Some(media_details) = &status_of_rradio.position_and_duration[status_of_rradio.channel_number].channel_data.media_details {
+                        format!("{}{}", 
+                        if media_details.device.starts_with("//") {"Remote USB "} else {"Local USB "},
+                         status_of_rradio.channel_number,)
+                    }
+                    else {format!("Unknown type {}", status_of_rradio.channel_number)}
+                }               
+                
+                
+//                format!("Local USB {}", status_of_rradio.channel_number),
+                //SourceType::Samba => format!("Remote USB {}", status_of_rradio.channel_number),
                 _ => format!("Station {}", status_of_rradio.channel_number),
             }
         } else {

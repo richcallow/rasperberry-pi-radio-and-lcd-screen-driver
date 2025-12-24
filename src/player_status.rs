@@ -95,12 +95,13 @@ impl PlayerStatus {
             time_started_playing_current_station: chrono::Utc::now(),
         }
     }
-    /// initialises for a new station, sets time_started_playing_current_station, RunningStatus::RunningNormally,
+    /// Initialises for a new station, sets time_started_playing_current_station, RunningStatus::RunningNormally,
     /// number_of_pings_to_this_channel = 0
     pub fn initialise_for_new_station(&mut self) {
         self.time_started_playing_current_station = chrono::Utc::now();
         self.running_status = RunningStatus::RunningNormally;
         self.ping_data.number_of_pings_to_this_channel = 0;
+
     }
 
     /// outputs the config file
@@ -146,6 +147,11 @@ impl PlayerStatus {
         )?;
         writeln!(
             report,
+            "Temperature & Wi-Fi\t{}",
+            lcd::Lc::get_temperature_and_wifi_strength_text()
+        )?;
+        writeln!(
+            report,
             "mute state is \t\t{}",
             get_mute_state::get_mute_state()
         )?;
@@ -171,37 +177,9 @@ impl PlayerStatus {
         writeln!(report, "position_and_duration follow if there are any")?;
         for (channel_count, channel_realtime_data) in self.position_and_duration.iter().enumerate()
         {
-            if (!channel_realtime_data.channel_data.station_urls.is_empty())
-                | (channel_count == 99)
-                | (channel_count == self.channel_number)
-            {
+            if !channel_realtime_data.channel_data.station_urls.is_empty() {
                 writeln!(report, "channel_count {}", channel_count)?;
 
-                writeln!(
-                    report,
-                    "\tchannel_data.organisation\t\t{:?}",
-                    channel_realtime_data.channel_data.organisation
-                )?;
-                writeln!(
-                    report,
-                    "\tchannel_data.source_type\t\t{:?}",
-                    channel_realtime_data.channel_data.source_type
-                )?;
-                writeln!(
-                    report,
-                    "\tchannel_data.last_track_is_a_ding\t{}",
-                    channel_realtime_data.channel_data.last_track_is_a_ding
-                )?;
-                writeln!(
-                    report,
-                    "\tchannel_data.pause_before_playing_ms\t{:?}",
-                    channel_realtime_data.channel_data.pause_before_playing_ms
-                )?;
-                writeln!(
-                    report,
-                    "\tchannel_data.media_details\t\t{:?}",
-                    channel_realtime_data.channel_data.media_details
-                )?;
                 writeln!(report, "\tartist\t\t\t{}", channel_realtime_data.artist)?;
 
                 writeln!(
@@ -227,6 +205,32 @@ impl PlayerStatus {
                     channel_realtime_data
                         .duration
                         .map(|duration| (duration.mseconds() as f32) / 1000.0)
+                )?;
+
+                writeln!(
+                    report,
+                    "\tchannel_data.organisation\t\t{:?}",
+                    channel_realtime_data.channel_data.organisation
+                )?;
+                writeln!(
+                    report,
+                    "\tchannel_data.source_type\t\t{:?}",
+                    channel_realtime_data.channel_data.source_type
+                )?;
+                writeln!(
+                    report,
+                    "\tchannel_data.last_track_is_a_ding\t{}",
+                    channel_realtime_data.channel_data.last_track_is_a_ding
+                )?;
+                writeln!(
+                    report,
+                    "\tchannel_data.pause_before_playing_ms\t{:?}",
+                    channel_realtime_data.channel_data.pause_before_playing_ms
+                )?;
+                writeln!(
+                    report,
+                    "\tchannel_data.media_details\t\t{:?}",
+                    channel_realtime_data.channel_data.media_details
                 )?;
 
                 writeln!(report, "\n\tTrack information follows")?;

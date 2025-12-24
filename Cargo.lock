@@ -1470,6 +1470,7 @@ dependencies = [
  "rand",
  "rppal",
  "serde",
+ "string-replace-all",
  "substring",
  "sys-mount",
  "tokio",
@@ -1736,6 +1737,15 @@ name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
+
+[[package]]
+name = "string-replace-all"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b12025ac754369ba77abd5ac18822294caaa36cdbdfd8832cacc4f904b5ff23c"
+dependencies = [
+ "regex",
+]
 
 [[package]]
 name = "substring"

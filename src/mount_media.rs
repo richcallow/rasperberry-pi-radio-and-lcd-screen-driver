@@ -33,6 +33,7 @@ pub fn mount_media(media_details: &mut MediaDetails) -> Result<String, ChannelEr
         println!("Device is already mounted\r");
         return Ok(media_details.mount_folder.clone()); // it is already mounted
     }
+
     let mut data_string;
     if let Some(authentication_data) = &media_details.authentication_data {
         data_string = format!(
