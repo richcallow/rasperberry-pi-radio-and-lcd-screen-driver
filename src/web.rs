@@ -16,6 +16,11 @@ use tokio::sync::oneshot;
 struct SliderValue {
     value: i32,
 }
+#[derive(serde::Deserialize)]
+struct PodcastText {
+    new_podcast_text: String,
+}
+
 /// An enum of all the events/commands received from client side
 #[derive(Debug)]
 pub enum Event {
@@ -32,6 +37,9 @@ pub enum Event {
     /// client side wants to set the play position to the given value
     UpdatePosition {
         position_ms: u64,
+    },
+    PodcastText {
+        new_podcast_text: String,
     },
 }
 
@@ -243,6 +251,19 @@ pub fn start_server() -> (
                 post(async |EventsTx { events_tx }| {
                     _ = events_tx.send(Event::VolumeDownPressed);
                 }),
+            )
+            .route(
+                "/podcast-text",
+                post(
+                    async |EventsTx { events_tx },
+                           axum::Form(PodcastText {
+                               new_podcast_text: new_podcast,
+                           })| {
+                        _ = events_tx.send(Event::PodcastText {
+                            new_podcast_text: (new_podcast),
+                        });
+                    },
+                ),
             )
             .route(
                 "/volume-up",

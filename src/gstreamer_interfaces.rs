@@ -227,6 +227,9 @@ impl PlaybinElement {
             ));
         }
 
+        my_dbg!(&status_of_rradio.position_and_duration[channel_number]
+                .channel_data
+                .station_urls[index_to_current_track]);
         self.playbin_element.set_property(
             "uri",
             // if "uri" does not exist, it panics, but that does not seem to be anything that can be done about it.

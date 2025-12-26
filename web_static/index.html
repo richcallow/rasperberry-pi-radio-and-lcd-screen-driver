@@ -14,14 +14,11 @@
 <body hx-ext="sse" sse-connect="/api/test-events">
     <h1>A Page</h1>
     <p>This is content</p>
-<div id = new-podcast> 
-    <label>
-        Podcast URL:
-        <input type="text" hx-post="/api/volume-down"   hx-trigger="input" my_id = 5>
-       <!---<input type="text" hx-post="/api/volume-down"   hx-trigger="paste" my_id = 5>-->
-    </label>
-    <button type = "button">Add poscast</button> 
-</div>
+    <div> 
+        <input type="text" name="new_podcast_text" hx-post="/api/podcast-text" hx-trigger="input" style='width:70em'>
+   <!---<input type="text" name="new_podcast_text" hx-post="/api/podcast-text" hx-trigger="paste"> -->
+        <button type = "button">Add podcast</button> 
+    </div>
 
     <div>
         <!-- When you click the volume down button, send a POST request to "volume-down" and ignore the response -->

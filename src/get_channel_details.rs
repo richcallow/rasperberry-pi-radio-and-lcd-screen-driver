@@ -130,7 +130,7 @@ pub enum ChannelErrorEvents {
     MediaNotSpecifiedInTomlfile,
 
     /// trying to mount something which is not mountable
-    MediaNotMountabletype (SourceType),
+    MediaNotMountabletype(SourceType),
 
     /// probably a bug as there should be files
     NoFilesInArray,
@@ -206,8 +206,8 @@ impl ChannelErrorEvents {
                 "Media not specified in TOML file".to_string()
             }
 
-            ChannelErrorEvents::MediaNotMountabletype (source_type) => {
-                format! ("{:?} media is not mountable", *source_type)
+            ChannelErrorEvents::MediaNotMountabletype(source_type) => {
+                format!("{:?} media is not mountable", *source_type)
             }
 
             ChannelErrorEvents::FailedtoGetCDdriveOrDiskStatus(error) => match error {
@@ -492,6 +492,27 @@ pub fn get_cd_details(
     })
 }
 
+/// Given a URL (starting with http) & optionally a port number it extracts the station address.
+/// Given an IP address, it returns the IP address unchanged. 
+pub fn get_ip_address(url: String) -> String {
+    let mut source_address = url.clone();
+    if let Some(position_double_slash) = source_address.find("//") {
+        let mut address_to_ping = source_address
+            .split_off(position_double_slash + 2)
+            .to_string(); // we add +2 to split after the //
+        // next if there is a suffix, we must remove it
+        if let Some(position_first_single_slash) = address_to_ping.find('/') {
+            let _suffix = address_to_ping.split_off(position_first_single_slash);
+        } // else there was no suffix so do nothing;
+
+        // but there might be a port number that we have to remove too
+        if let Some(position_of_colon) = address_to_ping.find(':') {
+            let _ = address_to_ping.split_off(position_of_colon);
+        }
+        return address_to_ping;
+    }
+    url
+}
 /// Updates status_of_rradio with the new channel data,
 /// if status_of_rradio.channel_number == previous_channel_number OR no data has been got yet for the channel
 pub fn store_channel_details_and_implement_them(
@@ -504,32 +525,15 @@ pub fn store_channel_details_and_implement_them(
     match get_channel_details(config, status_of_rradio) {
         Ok(new_channel_file_data) => {
             status_of_rradio.toml_error = None;
-
-            // Work out address to ping & store it
-            let mut source_address = new_channel_file_data.station_urls[0].clone();
-            if let Some(position_double_slash) = source_address.find("//") {
-                let mut address_to_ping = source_address
-                    .split_off(position_double_slash + 2)
-                    .to_string(); // we add +2 to split after the //
-                // next if there is a suffix, we must remove it
-                if let Some(position_first_single_slash) = address_to_ping.find('/') {
-                    let _suffix = address_to_ping.split_off(position_first_single_slash);
-                } // else there was no suffix so do nothing;
-
-                // but there might be a port number that we have to remove too
-                if let Some(position_of_colon) = address_to_ping.find(':') {
-                    let _ = address_to_ping.split_off(position_of_colon);
-                }
-                status_of_rradio.position_and_duration[status_of_rradio.channel_number]
-                    .address_to_ping = address_to_ping;
-            }
+            status_of_rradio.position_and_duration[status_of_rradio.channel_number]
+                .address_to_ping = get_ip_address(new_channel_file_data.station_urls[0].clone());
             if status_of_rradio.channel_number == previous_channel_number
                 || status_of_rradio.position_and_duration[status_of_rradio.channel_number]
                     .channel_data
                     .station_urls
                     .is_empty()
             {
-               // Either the user wants a new search, or this is the first time & there is no data.
+                // Either the user wants a new search, or this is the first time & there is no data.
                 // so, set  organisation,  station_urls, source_type,  last_track_is_a_ding
                 status_of_rradio.position_and_duration[status_of_rradio.channel_number]
                     .channel_data = new_channel_file_data;
@@ -758,7 +762,11 @@ fn set_up_playlist(
                             .clone(),
                         last_track_is_a_ding,
                         pause_before_playing_ms: toml_data.pause_before_playing_ms,
-                        media_details: status_of_rradio.position_and_duration[status_of_rradio.channel_number].channel_data.media_details.clone(),
+                        media_details: status_of_rradio.position_and_duration
+                            [status_of_rradio.channel_number]
+                            .channel_data
+                            .media_details
+                            .clone(),
                     })
                 }
                 Err(error_message) => {

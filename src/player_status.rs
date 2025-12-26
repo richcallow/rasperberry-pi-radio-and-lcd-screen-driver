@@ -48,6 +48,7 @@ impl Default for RealTimeDataOnOneChannel {
 /// The maximum possible as the channel number is 2 decimal digits. (The ding channel 100, so the user cannot enter it.)
 pub const NUMBER_OF_POSSIBLE_CHANNELS: usize = 100;
 pub const START_UP_DING_CHANNEL_NUMBER: usize = NUMBER_OF_POSSIBLE_CHANNELS;
+pub const PODCAST_CHANNEL_NUMBER: usize = NUMBER_OF_POSSIBLE_CHANNELS + 1;
 #[derive(Debug)] // neither Copy nor clone are implmented as the player can only have a single status
 /// A struct listing all information needed to display the status of rradio.
 pub struct PlayerStatus {
@@ -71,7 +72,7 @@ pub struct PlayerStatus {
     pub time_started_playing_current_station: chrono::DateTime<Utc>,
 
     /// Stores channel_file_data, organisation, a vec of startion URLs & whether or not the last track is a ding
-    pub position_and_duration: [RealTimeDataOnOneChannel; NUMBER_OF_POSSIBLE_CHANNELS + 1], // +1 so there is a channel to play the startup ding
+    pub position_and_duration: [RealTimeDataOnOneChannel; NUMBER_OF_POSSIBLE_CHANNELS + 2], // +1 so there is a channel to play the startup ding
 }
 
 impl PlayerStatus {
@@ -101,7 +102,6 @@ impl PlayerStatus {
         self.time_started_playing_current_station = chrono::Utc::now();
         self.running_status = RunningStatus::RunningNormally;
         self.ping_data.number_of_pings_to_this_channel = 0;
-
     }
 
     /// outputs the config file

@@ -34,6 +34,9 @@ use player_status::PlayerStatus;
 use string_replace_all::StringReplaceAll;
 use unmount::unmount_if_needed;
 
+use crate::get_channel_details::{ChannelFileDataDecoded, get_ip_address};
+use crate::player_status::{PODCAST_CHANNEL_NUMBER, RealTimeDataOnOneChannel};
+
 #[macro_export]
 macro_rules! my_dbg {
     // NOTE: We cannot use `concat!` to make a static string as a format argument
@@ -516,9 +519,6 @@ async fn main() -> Result<(), String> {
 
                     Some(Event::GStreamer(gstreamer_message)) => {
                         use gstreamer::MessageView;
-                        // let yy = gstreamer_message.view();
-                        // println!("yy{:?}\r", yy);
-
                         match gstreamer_message.view() {
                             MessageView::Buffering(buffering) => {
                                 status_of_rradio.buffering_percent = buffering.percent()
@@ -659,6 +659,35 @@ async fn main() -> Result<(), String> {
                                 gstreamer::ClockTime::from_mseconds(position_ms),
                             );
                         }
+                        web::Event::PodcastText { new_podcast_text } => {
+                            status_of_rradio.running_status = RunningStatus::RunningNormally;
+                            my_dbg!(&new_podcast_text);
+                            status_of_rradio.position_and_duration[PODCAST_CHANNEL_NUMBER] =
+                                RealTimeDataOnOneChannel {
+                                    artist: String::new(),
+                                    address_to_ping: get_ip_address(new_podcast_text.clone()),
+                                    index_to_current_track: 0,
+                                    position: ClockTime::ZERO,
+                                    duration: None,
+                                    channel_data: ChannelFileDataDecoded {
+                                        organisation: String::new(),
+                                        source_type: SourceType::UrlList,
+                                        last_track_is_a_ding: false,
+                                        pause_before_playing_ms: None,
+                                        station_urls: vec![new_podcast_text],
+                                        media_details: None,
+                                    },
+                                };
+                            status_of_rradio.channel_number = PODCAST_CHANNEL_NUMBER;
+                            let g =
+                                playbin.play_track(&mut status_of_rradio, &config, &mut lcd, true);
+
+                            my_dbg!(g);
+                        }
+                        //  http://open.live.bbc.co.uk/mediaselector/6/redir/version/2.0/mediaset/audio-nondrm-download-rss/proto/http/vpid/p0mksps9.mp3
+                        web::Event::SliderMoved { value } => {
+                            println!("new slider value {}\r", value)
+                        }
                         unhandled_web_event @ web::Event::SliderMoved { .. } => {
                             my_dbg!(unhandled_web_event);
                         }
@@ -717,7 +746,7 @@ async fn main() -> Result<(), String> {
                 lcd.write_rradio_status_to_lcd(&status_of_rradio, &config);
             } // closing parentheses of loop
 
-            if let Ok(wait_result) = child_ping.wait()      
+            if let Ok(wait_result) = child_ping.wait()
             // we need to have a wait on the ping in order to keep the compiler happy
                 && !wait_result.success()
             {
@@ -734,7 +763,7 @@ async fn main() -> Result<(), String> {
     }
 
     Ok(()) //as at the start we said it returned either "Ok(())" 
-        //or an error, as nothing has failed, we give the "all worked OK termination" value
+    //or an error, as nothing has failed, we give the "all worked OK termination" value
 }
 
 /// Generates the text for line 2 for the nornmal running case, ie streaming, USB or CD. Adds the throttled state if the Pi is throttled
