@@ -15,13 +15,12 @@ pub fn mount_media_for_current_channel(
         return Ok(String::new()); // Err(ChannelErrorEvents::MediaNotSpecifiedInTomlfile)
     };
 
-    if !matches!(
-        status_of_rradio.position_and_duration[status_of_rradio.channel_number]
-            .channel_data
-            .source_type,
-        SourceType::Usb | SourceType::Samba
-    ) {
-        return Err(ChannelErrorEvents::MediaNotMountabletype);
+    if status_of_rradio.position_and_duration[status_of_rradio.channel_number]
+        .channel_data
+        .source_type
+        != SourceType::Usb
+    {
+        return Err(ChannelErrorEvents::MediaNotMountabletype( status_of_rradio.position_and_duration[status_of_rradio.channel_number].channel_data.source_type.clone()));
     }
 
     mount_media(media_details)
@@ -71,7 +70,7 @@ pub fn mount_media(media_details: &mut MediaDetails) -> Result<String, ChannelEr
         }
 
         Err(mount_error) => {
-            eprintln!("samba mount error is {:?}\r", mount_error);
+            eprintln!("Samba mount error is {:?}\r", mount_error);
 
             // the value returned by the operating system if there is no device
             const OS_ERROR_NO_SUCH_FILE_OR_DIRECTORY: i32 = 2;

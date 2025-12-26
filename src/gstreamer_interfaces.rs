@@ -268,7 +268,7 @@ impl PlaybinElement {
                         .channel_data
                         .source_type
                     {
-                        SourceType::Cd | SourceType::Usb | SourceType::Samba => {
+                        SourceType::Cd | SourceType::Usb => {
                             let seek_time =
                                 status_of_rradio.position_and_duration[channel_number].position; // the position we will seek to in the units needed.
                             // we use seconds as the unit as that is directly avaialble AND without an "Option"

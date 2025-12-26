@@ -37,10 +37,8 @@ pub enum SourceType {
     /// a list of URLs to play
     UrlList,
     Cd,
-    /// we will play random tracks on this USB device
+    /// we will play random tracks on this local or remote USB device
     Usb,
-    /// we will play random tracks on this USB device  
-    Samba,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -131,8 +129,8 @@ pub enum ChannelErrorEvents {
     /// trying to mount media that nothing has been specified
     MediaNotSpecifiedInTomlfile,
 
-    /// trying to mount somethinf which is not mountable
-    MediaNotMountabletype,
+    /// trying to mount something which is not mountable
+    MediaNotMountabletype (SourceType),
 
     /// probably a bug as there should be files
     NoFilesInArray,
@@ -208,8 +206,8 @@ impl ChannelErrorEvents {
                 "Media not specified in TOML file".to_string()
             }
 
-            ChannelErrorEvents::MediaNotMountabletype => {
-                "This type of media is not mountable".to_string()
+            ChannelErrorEvents::MediaNotMountabletype (source_type) => {
+                format! ("{:?} media is not mountable", *source_type)
             }
 
             ChannelErrorEvents::FailedtoGetCDdriveOrDiskStatus(error) => match error {
@@ -247,7 +245,7 @@ pub fn get_channel_details_from_mountable_media(
 ) -> Result<ChannelFileDataDecoded, ChannelErrorEvents> {
     let mount_folder = mount_media::mount_media_for_current_channel(status_of_rradio)?;
 
-    //get an empty list of all the audio CD images on the USB memory stick or samba device
+    //get an empty list of all the audio CD images on the USB memory stick or Samba device
     let mut list_of_audio_album_images = Vec::new();
 
     match fs::read_dir(&mount_folder) {
@@ -531,7 +529,7 @@ pub fn store_channel_details_and_implement_them(
                     .station_urls
                     .is_empty()
             {
-                // Either the user wants a new search, or this is the first time & there is no data.
+               // Either the user wants a new search, or this is the first time & there is no data.
                 // so, set  organisation,  station_urls, source_type,  last_track_is_a_ding
                 status_of_rradio.position_and_duration[status_of_rradio.channel_number]
                     .channel_data = new_channel_file_data;
@@ -760,11 +758,7 @@ fn set_up_playlist(
                             .clone(),
                         last_track_is_a_ding,
                         pause_before_playing_ms: toml_data.pause_before_playing_ms,
-                        media_details: status_of_rradio.position_and_duration
-                            [status_of_rradio.channel_number]
-                            .channel_data
-                            .media_details
-                            .clone(),
+                        media_details: status_of_rradio.position_and_duration[status_of_rradio.channel_number].channel_data.media_details.clone(),
                     })
                 }
                 Err(error_message) => {

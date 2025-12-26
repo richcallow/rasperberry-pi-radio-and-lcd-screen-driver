@@ -239,7 +239,7 @@ pub fn insert_samba(config: &Config, status_of_rraadio: &mut PlayerStatus) {
                 organisation: String::new(),
                 last_track_is_a_ding: true,
                 pause_before_playing_ms: None,
-                source_type: crate::get_channel_details::SourceType::Samba,
+                source_type: crate::get_channel_details::SourceType::Usb,
                 station_urls: vec![],
                 media_details: Some(MediaDetails {
                     channel_number: samba.channel_number,

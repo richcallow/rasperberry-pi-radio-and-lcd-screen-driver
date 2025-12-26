@@ -520,19 +520,7 @@ impl Lc {
                     }
                     else {format!("Unknown type {}", status_of_rradio.channel_number)}
                 }
-                 SourceType::Samba => 
-                {
-                    if let Some(media_details) = &status_of_rradio.position_and_duration[status_of_rradio.channel_number].channel_data.media_details {
-                        format!("{}{}", 
-                        if media_details.device.starts_with("//") {"Remote USB "} else {"Local USB "},
-                         status_of_rradio.channel_number,)
-                    }
-                    else {format!("Unknown type {}", status_of_rradio.channel_number)}
-                }               
-                
-                
-//                format!("Local USB {}", status_of_rradio.channel_number),
-                //SourceType::Samba => format!("Remote USB {}", status_of_rradio.channel_number),
+             
                 _ => format!("Station {}", status_of_rradio.channel_number),
             }
         } else {
@@ -541,7 +529,7 @@ impl Lc {
                 .channel_data
                 .source_type
             {
-                SourceType::Cd | SourceType::Usb |SourceType::Samba => {
+                SourceType::Cd | SourceType::Usb  => {
                     let position_secs = status_of_rradio.position_and_duration
                         [status_of_rradio.channel_number]
                         .position

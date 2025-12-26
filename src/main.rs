@@ -31,6 +31,7 @@ use lcd::{RunningStatus, ScrollData};
 use ping::{get_ping_time, see_if_there_is_a_ping_response};
 use player_status::NUMBER_OF_POSSIBLE_CHANNELS;
 use player_status::PlayerStatus;
+use string_replace_all::StringReplaceAll;
 use unmount::unmount_if_needed;
 
 #[macro_export]
@@ -49,7 +50,6 @@ macro_rules! my_dbg {
             tmp => {
                 std::eprintln!("[{}:{}:{}] {} = {:?}\r",
                 std::file!(), std::line!(), std::column!(), std::stringify!($val), &tmp);
-
             }
         }
     };
@@ -458,7 +458,13 @@ async fn main() -> Result<(), String> {
                                         } => {
                                             status_of_rradio.toml_error = Some(format!(
                                                 "Could not parse channel {channel_number}. {}",
-                                                error_message.replace("\n", " ")
+                                                error_message
+                                                    .replace("\n", " ") // cannot handle new lines, so turn into spaces
+                                                    .replace("|", " ") // not very meaningful, so turn into spaces
+                                                    .replace("^", " ") // not very meaningful, so turn into spaces
+                                                    .replace_all("  ", " ")
+                                                    .replace_all("  ", " ")
+                                                    .replace_all("  ", " ")
                                             ));
                                         }
 
@@ -710,6 +716,13 @@ async fn main() -> Result<(), String> {
                     .update_scroll(&config, lcd::NUM_CHARACTERS_PER_LINE * 4);
                 lcd.write_rradio_status_to_lcd(&status_of_rradio, &config);
             } // closing parentheses of loop
+
+            if let Ok(wait_result) = child_ping.wait()      
+            // we need to have a wait on the ping in order to keep the compiler happy
+                && !wait_result.success()
+            {
+                eprintln!("Got the errro ping wait status on exit {:?}", wait_result);
+            }
         }
         Err(message) => {
             status_of_rradio
@@ -720,7 +733,8 @@ async fn main() -> Result<(), String> {
         }
     }
 
-    Ok(()) //as at the start we said it returned either "Ok(())" or an error, as nothing has failed, we give the "all worked OK termination" value
+    Ok(()) //as at the start we said it returned either "Ok(())" 
+        //or an error, as nothing has failed, we give the "all worked OK termination" value
 }
 
 /// Generates the text for line 2 for the nornmal running case, ie streaming, USB or CD. Adds the throttled state if the Pi is throttled
@@ -749,7 +763,7 @@ pub fn generate_line2(status_of_rradio: &PlayerStatus) -> String {
                 num_tracks
             )
         }
-        SourceType::Usb | SourceType::Samba => {
+        SourceType::Usb => {
             let mut num_tracks = status_of_rradio.position_and_duration
                 [status_of_rradio.channel_number]
                 .channel_data

@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Demo Page</title>
+    <title>New RRadio</title>
     <link rel="stylesheet" href="index.css">
     <script src="htmx.js"></script>
     <script src="htmx-ext-sse.js"></script>
@@ -13,8 +13,15 @@
 
 <body hx-ext="sse" sse-connect="/api/test-events">
     <h1>A Page</h1>
-
     <p>This is content</p>
+<div id = new-podcast> 
+    <label>
+        Podcast URL:
+        <input type="text" hx-post="/api/volume-down"   hx-trigger="input" my_id = 5>
+       <!---<input type="text" hx-post="/api/volume-down"   hx-trigger="paste" my_id = 5>-->
+    </label>
+    <button type = "button">Add poscast</button> 
+</div>
 
     <div>
         <!-- When you click the volume down button, send a POST request to "volume-down" and ignore the response -->
