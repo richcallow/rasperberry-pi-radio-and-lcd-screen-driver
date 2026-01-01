@@ -228,7 +228,6 @@ impl Config {
 /// inserts the SAMBA details in the Samaba part of status_of_rradio
 pub fn insert_samba(config: &Config, status_of_rraadio: &mut PlayerStatus) {
     if let Some(samba) = &config.samba {
-        let samba_clone = samba.clone();
         status_of_rraadio.position_and_duration[samba.channel_number] = RealTimeDataOnOneChannel {
             artist: String::new(),
             address_to_ping: String::new(),
@@ -243,10 +242,10 @@ pub fn insert_samba(config: &Config, status_of_rraadio: &mut PlayerStatus) {
                 station_urls: vec![],
                 media_details: Some(MediaDetails {
                     channel_number: samba.channel_number,
-                    authentication_data: samba_clone.authentication_data,
-                    version: samba_clone.version,
-                    device: samba_clone.device,
-                    mount_folder: samba_clone.mount_folder,
+                    authentication_data: samba.authentication_data.clone(),
+                    version: samba.version.clone(),
+                    device: samba.device.clone(),
+                    mount_folder: samba.mount_folder.clone(),
                     is_mounted: false,
                 }),
             },
@@ -257,7 +256,6 @@ pub fn insert_samba(config: &Config, status_of_rraadio: &mut PlayerStatus) {
 /// inserts the USB details in the USB part of status_of_rradio
 pub fn insert_usb(config: &Config, status_of_rraadio: &mut PlayerStatus) {
     if let Some(usb) = &config.usb {
-        let usb_clone = usb.clone();
         status_of_rraadio.position_and_duration[usb.channel_number] = RealTimeDataOnOneChannel {
             artist: String::new(),
             address_to_ping: String::new(),
@@ -274,8 +272,8 @@ pub fn insert_usb(config: &Config, status_of_rraadio: &mut PlayerStatus) {
                     channel_number: usb.channel_number,
                     authentication_data: None,
                     version: None,
-                    device: usb_clone.device,
-                    mount_folder: usb_clone.mount_folder,
+                    device: usb.device.clone(),
+                    mount_folder: usb.mount_folder.clone(),
                     is_mounted: false,
                 }),
             },

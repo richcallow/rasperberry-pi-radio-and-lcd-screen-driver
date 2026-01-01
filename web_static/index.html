@@ -14,11 +14,19 @@
 <body hx-ext="sse" sse-connect="/api/test-events">
     <h1>A Page</h1>
     <p>This is content</p>
-    <div> 
-        <input type="text" name="new_podcast_text" hx-post="/api/podcast-text" hx-trigger="input" style='width:70em'>
-   <!---<input type="text" name="new_podcast_text" hx-post="/api/podcast-text" hx-trigger="paste"> -->
-        <button type = "button">Add podcast</button> 
+
+     <div> 
+        <input type="text" name="new_rss" hx-post="/api/new-rss" hx-trigger="input" style='width:70em' value = "RSS here">
+    <!---<input type="text" name="new_podcast_rsi" hx-post="/api/podcast-rsi" hx-trigger="paste"> -->
+        <!-- When you click the RSS button, send a POST request to "get-rss" and ignore the response -->
+        <button hx-post="/api/get-rss" hx-swap="none">get RSS data</button>     
     </div>
+
+    <div> 
+        <input type="text" name="new_podcast_text" hx-post="/api/podcast-text" hx-trigger="input" style='width:70em' value = "Pasting a URL in this box will play the URL">
+    </div>
+
+
 
     <div>
         <!-- When you click the volume down button, send a POST request to "volume-down" and ignore the response -->

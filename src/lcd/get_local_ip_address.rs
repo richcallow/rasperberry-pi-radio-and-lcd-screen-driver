@@ -126,13 +126,12 @@ pub fn set_up_wifi_password(
             ));
         }
 
-        config_as_result =
-            std::fs::read_to_string(passfile.clone()).map_err(|toml_file_read_error| {
-                format!(
-                    "Program {} Couldn't read file {passfile}. Got {toml_file_read_error}",
-                    env!("CARGO_PKG_NAME")
-                )
-            });
+        config_as_result = std::fs::read_to_string(&passfile).map_err(|toml_file_read_error| {
+            format!(
+                "Program {} Couldn't read file {passfile}. Got {toml_file_read_error}",
+                env!("CARGO_PKG_NAME")
+            )
+        });
         // next unmount the USB stick as we have read the file before any other errors might happen
         if let Err(error_message) = unmount_if_needed(
             &mut status_of_rradio.position_and_duration[usb_config.channel_number],

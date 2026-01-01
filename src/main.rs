@@ -13,6 +13,7 @@ use gstreamer::{SeekFlags, prelude::ElementExtManual};
 use gstreamer_interfaces::PlaybinElement;
 
 mod cd_functions;
+mod extract_html;
 mod get_channel_details;
 mod get_config_file_path;
 mod gstreamer_interfaces;
@@ -34,6 +35,8 @@ use player_status::PlayerStatus;
 use string_replace_all::StringReplaceAll;
 use unmount::unmount_if_needed;
 
+use crate::extract_html::extract;
+use crate::extract_html::extractz;
 use crate::get_channel_details::{ChannelFileDataDecoded, get_ip_address};
 use crate::player_status::{PODCAST_CHANNEL_NUMBER, RealTimeDataOnOneChannel};
 
@@ -571,7 +574,15 @@ async fn main() -> Result<(), String> {
                                                 status_of_rradio.position_and_duration
                                                     [status_of_rradio.channel_number]
                                                     .artist = artist.to_string();
-                                                println!("got new artist!!! {artist:?}\r")
+                                                println!("got new artist!!! {artist:?}\r");
+                                                if status_of_rradio.channel_number
+                                                    == PODCAST_CHANNEL_NUMBER
+                                                {
+                                                    let line2 = generate_line2(&status_of_rradio);
+                                                    status_of_rradio
+                                                        .line_2_data
+                                                        .update_if_changed(line2.as_str())
+                                                }
                                             }
                                         }
                                         _ => {}
@@ -659,9 +670,70 @@ async fn main() -> Result<(), String> {
                                 gstreamer::ClockTime::from_mseconds(position_ms),
                             );
                         }
+                        web::Event::RssChanged { new_rss } => {
+                            let channel_title = extract(&new_rss, "<channel><title>", "</title>");
+                            let description =
+                                extract(&new_rss, "<description><![CDATA[", "]]></description>");
+
+                            let podcasts: Vec<&str> = new_rss.split("</itunes:summary>").collect();
+                            my_dbg!(channel_title, description);
+
+                            let mut count = 0;
+                            for podcast in &podcasts {
+                                if podcast.contains("<enclosure url=") {
+                                    let date = extractz(podcast, "<item><title>", "</title>");
+                                    let url = extractz(podcast, "<enclosure url=\"", "\" length");
+                                    let subtitle = extractz(
+                                        podcast,
+                                        "<itunes:subtitle>",
+                                        "</itunes:subtitle>",
+                                    );
+                                    let summary =
+                                        extractz(podcast, "<itunes:summary><![CDATA[", "]]>");
+                                    //my_dbg!(podcast);
+                                    println!(
+                                        "\r\ncount {} date{} subtitle{} url{}zz\r",
+                                        count, date, subtitle, url
+                                    );
+
+                                    let part_summary = if summary.len() > 25 {
+                                        &summary[0..25]
+                                    } else {
+                                        println!("\r\n{:?}\r\n", podcast);
+                                        summary
+                                    };
+                                    my_dbg!(part_summary);
+                                    count += 1;
+                                }
+                            }
+                        }
+                        web::Event::Getrss => {
+                            my_dbg!("get rsss pressed");
+                            match reqwest::get("https://podcasts.files.bbci.co.uk/b006qpgr.rss")
+                                .await
+                            {
+                                Ok(gg) => {
+                                    println!("get response {:?}\r", gg);
+                                    let kk = gg.text().await;
+                                    my_dbg!(kk);
+                                }
+                                Err(hh) => {}
+                            }
+
+                            //text()
+                            //await?;
+
+                            /*                            let body = reqwest::get("https://www.rust-lang.org")
+                                                           .await?
+                                                           .text()
+                                                           .await?;
+                            */
+
+                            //println!("body = {body:?}\r");
+                        }
+
                         web::Event::PodcastText { new_podcast_text } => {
                             status_of_rradio.running_status = RunningStatus::RunningNormally;
-                            my_dbg!(&new_podcast_text);
                             status_of_rradio.position_and_duration[PODCAST_CHANNEL_NUMBER] =
                                 RealTimeDataOnOneChannel {
                                     artist: String::new(),
@@ -679,17 +751,27 @@ async fn main() -> Result<(), String> {
                                     },
                                 };
                             status_of_rradio.channel_number = PODCAST_CHANNEL_NUMBER;
-                            let g =
-                                playbin.play_track(&mut status_of_rradio, &config, &mut lcd, true);
-
-                            my_dbg!(g);
+                            status_of_rradio.initialise_for_new_station();
+                            if let Err(playbin_error_message) =
+                                playbin.play_track(&mut status_of_rradio, &config, &mut lcd, true)
+                            {
+                                status_of_rradio.all_4lines.update_if_changed(
+                                    format!("When playing a track on channel {} got {playbin_error_message}", status_of_rradio.channel_number)
+                                        .as_str());
+                                status_of_rradio.running_status =
+                                    RunningStatus::LongMessageOnAll4Lines;
+                            } else {
+                                // play worked
+                                my_dbg!("");
+                                let line2 = generate_line2(&status_of_rradio);
+                                status_of_rradio
+                                    .line_2_data
+                                    .update_if_changed(line2.as_str())
+                            }
                         }
                         //  http://open.live.bbc.co.uk/mediaselector/6/redir/version/2.0/mediaset/audio-nondrm-download-rss/proto/http/vpid/p0mksps9.mp3
                         web::Event::SliderMoved { value } => {
                             println!("new slider value {}\r", value)
-                        }
-                        unhandled_web_event @ web::Event::SliderMoved { .. } => {
-                            my_dbg!(unhandled_web_event);
                         }
                     },
                     Some(Event::Ticker(_now)) => {
@@ -820,7 +902,7 @@ pub fn generate_line2(status_of_rradio: &PlayerStatus) -> String {
             .channel_data
             .organisation
             .to_string(),
-        SourceType::UnknownSource => "Unnown source type".to_string(),
+        SourceType::UnknownSource => "Unknown source type".to_string(),
     };
     let throttled_status = lcd::get_throttled::is_throttled();
     if throttled_status.pi_is_throttled {

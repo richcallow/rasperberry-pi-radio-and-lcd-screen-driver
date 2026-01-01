@@ -493,7 +493,7 @@ pub fn get_cd_details(
 }
 
 /// Given a URL (starting with http) & optionally a port number it extracts the station address.
-/// Given an IP address, it returns the IP address unchanged. 
+/// Given an IP address, it returns the IP address unchanged.
 pub fn get_ip_address(url: String) -> String {
     let mut source_address = url.clone();
     if let Some(position_double_slash) = source_address.find("//") {

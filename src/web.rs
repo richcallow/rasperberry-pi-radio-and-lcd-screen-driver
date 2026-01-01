@@ -20,6 +20,10 @@ struct SliderValue {
 struct PodcastText {
     new_podcast_text: String,
 }
+#[derive(serde::Deserialize)]
+struct PodcastTexy {
+    new_rss: String,
+}
 
 /// An enum of all the events/commands received from client side
 #[derive(Debug)]
@@ -32,6 +36,8 @@ pub enum Event {
     RequestRRadioStatusReport {
         report_tx: oneshot::Sender<Result<String, std::fmt::Error>>,
     },
+    /// get the RSS data & decode it.
+    Getrss,
     VolumeDownPressed,
     VolumeUpPressed,
     /// client side wants to set the play position to the given value
@@ -40,6 +46,9 @@ pub enum Event {
     },
     PodcastText {
         new_podcast_text: String,
+    },
+    RssChanged {
+        new_rss: String,
     },
 }
 
@@ -246,6 +255,14 @@ pub fn start_server() -> (
                     }
                 }),
             )
+
+
+            .route(
+                "/get-rss",
+                post(async |EventsTx { events_tx }| {
+                    _ = events_tx.send(Event::Getrss);
+                }),
+            )
             .route(
                 "/volume-down",
                 post(async |EventsTx { events_tx }| {
@@ -253,14 +270,21 @@ pub fn start_server() -> (
                 }),
             )
             .route(
+                "/new-rss", // must match the hx-post entry
+                post(
+                    async |EventsTx { events_tx }, axum::Form(PodcastTexy { new_rss })| {
+                        _ = events_tx.send(Event::RssChanged {
+                            new_rss: (new_rss.to_string()),
+                        });
+                    },
+                ),
+            )
+            .route(
                 "/podcast-text",
                 post(
-                    async |EventsTx { events_tx },
-                           axum::Form(PodcastText {
-                               new_podcast_text: new_podcast,
-                           })| {
+                    async |EventsTx { events_tx }, axum::Form(PodcastText { new_podcast_text })| {
                         _ = events_tx.send(Event::PodcastText {
-                            new_podcast_text: (new_podcast),
+                            new_podcast_text: (new_podcast_text),
                         });
                     },
                 ),

@@ -47,8 +47,9 @@ impl Default for RealTimeDataOnOneChannel {
 
 /// The maximum possible as the channel number is 2 decimal digits. (The ding channel 100, so the user cannot enter it.)
 pub const NUMBER_OF_POSSIBLE_CHANNELS: usize = 100;
-pub const START_UP_DING_CHANNEL_NUMBER: usize = NUMBER_OF_POSSIBLE_CHANNELS;
-pub const PODCAST_CHANNEL_NUMBER: usize = NUMBER_OF_POSSIBLE_CHANNELS + 1;
+/// PODCAST_CHANNEL_NUMBER must be less than START_UP_DING_CHANNEL_NUMBER or else we do not get position & duration
+pub const PODCAST_CHANNEL_NUMBER: usize = NUMBER_OF_POSSIBLE_CHANNELS;
+pub const START_UP_DING_CHANNEL_NUMBER: usize = NUMBER_OF_POSSIBLE_CHANNELS + 1;
 #[derive(Debug)] // neither Copy nor clone are implmented as the player can only have a single status
 /// A struct listing all information needed to display the status of rradio.
 pub struct PlayerStatus {
