@@ -33,6 +33,7 @@ use ping::{get_ping_time, see_if_there_is_a_ping_response};
 use player_status::NUMBER_OF_POSSIBLE_CHANNELS;
 use player_status::PlayerStatus;
 use string_replace_all::StringReplaceAll;
+use substring::Substring;
 use unmount::unmount_if_needed;
 
 use crate::extract_html::extract;
@@ -514,6 +515,10 @@ async fn main() -> Result<(), String> {
                         keyboard::Event::OutputConfigDebug => {
                             status_of_rradio.output_config_information(&config);
                         }
+                        keyboard::Event::OutputRssData => println!(
+                            "\r\nRSS data\r\n{:?}",
+                            status_of_rradio.latest_podcast_string
+                        ),
                         keyboard::Event::OutputMountFolderContents => {
                             status_of_rradio.output_mount_folder_contents(&config)
                         }
@@ -671,65 +676,75 @@ async fn main() -> Result<(), String> {
                             );
                         }
                         web::Event::RssChanged { new_rss } => {
-                            let channel_title = extract(&new_rss, "<channel><title>", "</title>");
-                            let description =
-                                extract(&new_rss, "<description><![CDATA[", "]]></description>");
+                            if let Some(podcast_string) = &status_of_rradio.latest_podcast_string {
+                                let channel_title =
+                                    extract(podcast_string, "<channel><title>", "</title>");
+                                let description = extract(
+                                    podcast_string,
+                                    "<description><![CDATA[",
+                                    "]]></description>",
+                                );
 
-                            let podcasts: Vec<&str> = new_rss.split("</itunes:summary>").collect();
-                            my_dbg!(channel_title, description);
+                                let podcasts: Vec<&str> =
+                                    podcast_string.split("</itunes:summary>").collect();
+                                my_dbg!(channel_title, description);
 
-                            let mut count = 0;
-                            for podcast in &podcasts {
-                                if podcast.contains("<enclosure url=") {
-                                    let date = extractz(podcast, "<item><title>", "</title>");
-                                    let url = extractz(podcast, "<enclosure url=\"", "\" length");
-                                    let subtitle = extractz(
-                                        podcast,
-                                        "<itunes:subtitle>",
-                                        "</itunes:subtitle>",
-                                    );
-                                    let summary =
-                                        extractz(podcast, "<itunes:summary><![CDATA[", "]]>");
-                                    //my_dbg!(podcast);
-                                    println!(
-                                        "\r\ncount {} date{} subtitle{} url{}zz\r",
-                                        count, date, subtitle, url
-                                    );
+                                let mut count = 0;
+                                for podcast in &podcasts {
+                                    if podcast.contains("<enclosure url=") {
+                                        let date = extractz(podcast, "<item><title>", "</title>");
+                                        let url =
+                                            extractz(podcast, "<enclosure url=\"", "\" length");
+                                        let subtitle = extractz(
+                                            podcast,
+                                            "<itunes:subtitle>",
+                                            "</itunes:subtitle>",
+                                        );
+                                        let summary =
+                                            extractz(podcast, "<itunes:summary><![CDATA[", "]]>");
+                                        //my_dbg!(podcast);
+                                        println!(
+                                            "\r\ncount {} date{} subtitle{} url{}\r",
+                                            count, date, subtitle, url
+                                        );
 
-                                    let part_summary = if summary.len() > 25 {
-                                        &summary[0..25]
-                                    } else {
-                                        println!("\r\n{:?}\r\n", podcast);
-                                        summary
-                                    };
-                                    my_dbg!(part_summary);
-                                    count += 1;
+                                        let part_summary = if summary.chars().count() > 200 {
+                                            summary.substring(0, 200)
+                                        } else {
+                                            my_dbg!(summary, podcast);
+                                            summary
+                                        };
+                                        my_dbg!(part_summary);
+                                        count += 1;
+                                    }
                                 }
                             }
                         }
                         web::Event::Getrss => {
-                            my_dbg!("get rsss pressed");
                             match reqwest::get("https://podcasts.files.bbci.co.uk/b006qpgr.rss")
                                 .await
                             {
-                                Ok(gg) => {
-                                    println!("get response {:?}\r", gg);
-                                    let kk = gg.text().await;
-                                    my_dbg!(kk);
+                                Ok(podcast_response) => match podcast_response.text().await {
+                                    Ok(podcast_string) => {
+                                        status_of_rradio.latest_podcast_string =
+                                            Some(podcast_string);
+                                    }
+                                    Err(wait_error) => {
+                                        status_of_rradio.latest_podcast_string = None;
+                                        eprintln!(
+                                            "When waiting for RSS got error {:?}\r",
+                                            wait_error.to_string()
+                                        )
+                                    }
+                                },
+                                Err(wait_error2) => {
+                                    status_of_rradio.latest_podcast_string = None;
+                                    eprintln!(
+                                        "When waiting2 for RSS got error {:?}\r",
+                                        wait_error2.to_string()
+                                    )
                                 }
-                                Err(hh) => {}
                             }
-
-                            //text()
-                            //await?;
-
-                            /*                            let body = reqwest::get("https://www.rust-lang.org")
-                                                           .await?
-                                                           .text()
-                                                           .await?;
-                            */
-
-                            //println!("body = {body:?}\r");
                         }
 
                         web::Event::PodcastText { new_podcast_text } => {
