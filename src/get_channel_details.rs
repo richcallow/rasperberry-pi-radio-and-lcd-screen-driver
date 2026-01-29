@@ -8,7 +8,7 @@ use crate::{
     player_status::{PlayerStatus, START_UP_DING_CHANNEL_NUMBER},
 };
 
-use crate::{lcd, my_dbg};
+use crate::lcd;
 use std::{fs, os::fd::AsRawFd};
 use substring::Substring;
 

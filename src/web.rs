@@ -16,21 +16,53 @@ use tokio::sync::oneshot;
 struct SliderValue {
     value: i32,
 }
+
+/// Gives the index number of the episode that a user has selected.
+#[derive(serde::Deserialize)]
+struct EpisodeSelected {
+    episode_index: usize,
+}
+
+
+/// Gives the index number of the podcast that a user has selected.
+/// used when the user has changed the podcast they want ie they want "the Archers"
+
+#[derive(serde::Deserialize)]
+struct PodcastIndex {
+    podcast_index: i32,
+}
+
+
 #[derive(serde::Deserialize)]
 struct PodcastText {
     new_podcast_text: String,
 }
-#[derive(serde::Deserialize)]
-struct PodcastTexy {
-    new_rss: String,
+
+/// a struct of all the data that the Webserver needs to send to the client when the client starts
+#[derive(Debug)]
+pub struct WebPageStartupData{
+    pub volume :i32,
+    pub podcast_data_for_all_stations: Vec<PodcastDataFromToml>,
 }
+
 
 /// An enum of all the events/commands received from client side
 #[derive(Debug)]
 pub enum Event {
+    /// We have received a request from the client for the startup data, 
+    /// so forward the request to the main program
+    RequestWebPageStartupData{web_page_startup_data_tx : oneshot::Sender<WebPageStartupData>},
+
     SliderMoved {
         value: i32,
     },
+
+    /// User has specified the episode wanted, so forward that to the main program
+    EpisodeSelected {
+    /// Gives the index number of the episode that a user has selected.
+       episode_index: usize,
+    },
+
     /// Received when client side requests structure holding the program status,
     /// typically when the page is loaded
     RequestRRadioStatusReport {
@@ -38,7 +70,18 @@ pub enum Event {
     },
     /// get the RSS data & decode it.
     Getrss,
+    
+    /// user has pressed the volume down button, so inform the main program
     VolumeDownPressed,
+
+    /// user has changed the dropdown box value to choose the podcast they want to hear
+    /// They have still got to select the episode within the podcast at this point.
+    PodcastIndexChanged{
+        podcast_index: i32,
+    },  
+
+    /// user pressed the initialise <button
+    PlayPause,
     VolumeUpPressed,
     /// client side wants to set the play position to the given value
     UpdatePosition {
@@ -47,10 +90,11 @@ pub enum Event {
     PodcastText {
         new_podcast_text: String,
     },
-    RssChanged {
-        new_rss: String,
-    },
 }
+
+use crate::{EpisodeDataForOnePodcastDownloaded, my_dbg};
+
+use super::PodcastDataFromToml;
 
 /// Real-time information as sent to client.
 #[derive(Clone)]
@@ -62,6 +106,13 @@ pub enum DataChanged {
         position: ClockTime,
         duration: Option<ClockTime>,
     },
+    /// The podcast data for all the channels as read from the TOML file, ie title & URL
+    Podcast {
+        podcast_data_from_toml: Vec<PodcastDataFromToml>,
+    },
+    /// the podcast data for one station, obtained by using selecting a station
+    /// & then looking up the required data
+    EpisodeDataForOnePodcast{episode_data_for_one_podcast: EpisodeDataForOnePodcastDownloaded,},
 }
 
 /// Receiving end of data received from main loop (in "main")
@@ -126,7 +177,7 @@ async fn handle_rradio_status_report(
     EventsTx { events_tx }: EventsTx,
 ) -> Result<axum::response::Response, axum::response::Response> {
     // a oneshot channel can only send a single message.
-    // eg if one thing send a message, it can only have a single reply
+    // eg if one thing sends a message, it can only have a single reply
     let (report_tx, report_rx) = oneshot::channel();
 
     events_tx
@@ -158,20 +209,78 @@ async fn handle_rradio_status_report(
         .map(IntoResponse::into_response)
 }
 
-/// render from data to HTML in the form that the inital test page expects
-/// TBD decide if I keep the test page.
-fn render_test_events_data_changed(
+/// render from data to HTML in the form that the inital page expects
+/// handles volume, position etc changes
+fn render_events_data_changed(
     data_changed: DataChanged,
 ) -> Result<axum::response::sse::Event, core::convert::Infallible> {
-    use maud::Render;
+    use maud::{Render, html};
 
     Ok(match data_changed {
+        DataChanged::Podcast {
+            podcast_data_from_toml,
+        } => {
+            // Create the SSE Event which will be returned (inside OK(...))
+            axum::response::sse::Event::default()
+                .event("podcast-changed-by-user")
+                .data(
+                    html!(  // this macro creates HTML from the contents of the brackets
+                    {
+                        select name="podcast_index" hx-post="/api/podcast-changed-by-user" hx-trigger="change" 
+                        hx-swap="none" {
+                            // generate the first value for the dropdown box
+                            option value = (-1) {(" Select Podcast")}    // -1 denotes not a real value
+                            // iterate over the stations & output the station name
+                            @for count in 0.. podcast_data_from_toml.len(){     // for each podcast
+                                // generate another value for the dropdown box
+                                option value = (count) {(podcast_data_from_toml[count].title)}
+
+                            /*
+                            if the following code is used instead of the previous line, that will force the first line to be selected. 
+                            but, showing the first line is the default
+                            @if count == 0 {
+                            option value = (count) selected {(podcast_data_from_toml[count].title)}
+                            }
+                            @else { option value = (count) {(podcast_data_from_toml[count].title)} }
+                            */
+                            }                               
+                        }
+                    }                 
+                                    
+                )
+            .render()
+            .into_string(),
+            )
+        }
+
+        DataChanged::EpisodeDataForOnePodcast { episode_data_for_one_podcast } => {
+            // Create the SSE Event which will be returned (inside OK(...))
+                       
+            axum::response::sse::Event::default()
+                .event("list-of-episodes")
+                .data(
+                    maud::html!{ center{label { h2{ "podcast" (episode_data_for_one_podcast.channel_title) }}
+                        p { (episode_data_for_one_podcast.description)}}
+                        p { @for count in 0.. episode_data_for_one_podcast.data_for_multiple_episodes.len() {                       
+                            p {(episode_data_for_one_podcast.data_for_multiple_episodes[count].date)}
+                            p {(episode_data_for_one_podcast.data_for_multiple_episodes[count].summary)}
+                            P { button  hx-post ="/api/list-of-episodes" hx-swap= "none" name ="episode_index" value = (count) 
+                            { "Stream   " (episode_data_for_one_podcast.data_for_multiple_episodes[count].subtitle)} }
+                            } // end of for loop content
+                        } // end of for
+
+                    }  
+                        .render()
+                        .into_string(),
+                )            
+        },
+
         DataChanged::Volume(volume) => {
             // Create the SSE Event which will be returned (inside OK(...))
             axum::response::sse::Event::default()
                 .event("volume-changed")
                 .data(
-                    maud::html!(span { "Volume:" (volume) })
+                    maud::html!({ "Volume:" (volume) } )
                         .render()
                         .into_string(),
                 )
@@ -206,17 +315,45 @@ fn render_test_events_data_changed(
     })
 }
 
-/// Handle a request for test events by the client.
-async fn handle_test_events(
+/// Handle a request for events by the client.
+async fn handle_events(
+    EventsTx { events_tx }: EventsTx,
     DataChangedReceiver { data_changed_rx }: DataChangedReceiver,
-) -> axum::response::Response {
+) -> Result<axum::response::Response,axum::response::Response> {
     use futures_util::StreamExt;
 
-    let event_stream = tokio_stream::wrappers::BroadcastStream::new(data_changed_rx)
-        .filter_map(async |data_changed| data_changed.ok())
-        .map(render_test_events_data_changed);
+// a oneshot channel can only send a single message.
+    // eg if one thing sends a message, it can only have a single reply
+    let (web_page_startup_data_tx, web_page_startup_data_rx) = oneshot::channel();
 
-    axum::response::Sse::new(event_stream).into_response()
+    events_tx
+        .send(Event::RequestWebPageStartupData { web_page_startup_data_tx  } )
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to send request for startup data Event to main loop",
+            )
+                .into_response()
+        })?;
+        let WebPageStartupData { volume, podcast_data_for_all_stations } = 
+            web_page_startup_data_rx.await.map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to wait for  startup data from main loop",
+            )
+                .into_response()
+        })?;
+
+    let startup_events = futures_util::stream::iter([
+        DataChanged::Volume(volume), DataChanged::Podcast { podcast_data_from_toml: podcast_data_for_all_stations }
+    ]); 
+
+    let event_stream = 
+        startup_events.chain( tokio_stream::wrappers::BroadcastStream::new(data_changed_rx)
+        .filter_map(async |data_changed| data_changed.ok()))
+        .map(render_events_data_changed);
+
+    Ok(axum::response::Sse::new(event_stream).into_response())
 }
 
 /// Configure and start the web server.
@@ -228,7 +365,8 @@ pub fn start_server() -> (
     let (events_tx, events_rx) = tokio::sync::mpsc::unbounded_channel::<Event>();
 
     // Setup the comms channel for the main loop to notify the client of data changing.
-    const DATA_CHANGED_MESSAGE_QUEUE_SIZE: usize = 20; // The maximum number of messages queued before they are dropped, due to a backlog.
+    const DATA_CHANGED_MESSAGE_QUEUE_SIZE: usize = 20; 
+// The maximum number of messages queued before they are dropped, due to a backlog.
     let (data_changed_tx, data_changed_rx) =
         tokio::sync::broadcast::channel(DATA_CHANGED_MESSAGE_QUEUE_SIZE);
 
@@ -239,7 +377,7 @@ pub fn start_server() -> (
         // Declare the api routes for making API calls into the Pi.
         // this router is nested inside the router called "app", so cannot be seen externally
         let api_router = axum::Router::new()
-            .route("/test-events", get(handle_test_events))
+            .route("/main-page-events", get(handle_events))
             .route(
                 // this route is used to push new positions from the client to the server
                 "/position", // this line says it is to do with "/position"
@@ -255,6 +393,15 @@ pub fn start_server() -> (
                     }
                 }),
             )
+            
+            .route(
+                "/podcast-changed-by-user",
+        post(async |EventsTx { events_tx }, axum::Form(PodcastIndex{podcast_index})| {
+                    // the user has changed the podcast they want ie they want "the Archers"
+                    _ = events_tx.send(Event::PodcastIndexChanged { podcast_index});
+
+                }),
+            )
 
 
             .route(
@@ -264,30 +411,21 @@ pub fn start_server() -> (
                 }),
             )
             .route(
-                "/volume-down",
-                post(async |EventsTx { events_tx }| {
-                    _ = events_tx.send(Event::VolumeDownPressed);
-                }),
-            )
-            .route(
-                "/new-rss", // must match the hx-post entry
-                post(
-                    async |EventsTx { events_tx }, axum::Form(PodcastTexy { new_rss })| {
-                        _ = events_tx.send(Event::RssChanged {
-                            new_rss: (new_rss.to_string()),
-                        });
-                    },
-                ),
-            )
-            .route(
                 "/podcast-text",
                 post(
                     async |EventsTx { events_tx }, axum::Form(PodcastText { new_podcast_text })| {
                         _ = events_tx.send(Event::PodcastText {
-                            new_podcast_text: (new_podcast_text),
+                            new_podcast_text: (new_podcast_text.trim().to_string()),
+                            //we trim it in case there are leading or trailing spaces
                         });
                     },
                 ),
+            )
+            .route(
+                "/playpause",
+                post(async |EventsTx { events_tx }| {
+                    _ = events_tx.send(Event::PlayPause);
+                }),
             )
             .route(
                 "/volume-up",
@@ -295,6 +433,24 @@ pub fn start_server() -> (
                     _ = events_tx.send(Event::VolumeUpPressed);
                 }),
             )
+            .route(
+                "/volume-down",
+                post(async |EventsTx { events_tx }| {
+                    _ = events_tx.send(Event::VolumeDownPressed);
+                }),
+            )
+
+
+            .route(
+                "/list-of-episodes",
+                post(
+                    async |EventsTx { events_tx }, axum::Form(EpisodeSelected { episode_index })| {
+                        _ = events_tx.send(Event::EpisodeSelected { episode_index });
+
+  
+                    },
+                ),
+            )            
             .route(
                 "/slider-move",
                 post(
@@ -310,6 +466,7 @@ pub fn start_server() -> (
                     },
                 ),
             );
+            
 
         // The top-level application router, called whenever the client makes an HTTP request
         let app = memory_serve::MemoryServe::new(memory_serve::load_assets!("web_static"))

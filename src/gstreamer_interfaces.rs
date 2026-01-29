@@ -1,6 +1,6 @@
 use crate::lcd::{LineNum, TextBuffer};
 use crate::unmount::unmount_if_needed;
-use crate::{PlayerStatus, mount_media, my_dbg};
+use crate::{PlayerStatus, mount_media};
 use crate::{
     get_channel_details::SourceType,
     lcd::RunningStatus,

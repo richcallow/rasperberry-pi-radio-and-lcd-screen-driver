@@ -1,5 +1,6 @@
 use std::fs;
 
+use super::PodcastDataAllStations;
 use chrono::Utc;
 use gstreamer::ClockTime;
 
@@ -63,6 +64,7 @@ pub struct PlayerStatus {
     pub current_volume: i32,
     pub gstreamer_state: gstreamer::State,
     pub buffering_percent: i32,
+    pub podcast_data_from_toml: PodcastDataAllStations,
     pub latest_podcast_string: Option<String>,
     /// stores SSID, local IP address & gateway address
     pub network_data: get_local_ip_address::NetworkData,
@@ -72,7 +74,6 @@ pub struct PlayerStatus {
     pub line_2_data: lcd::ScrollData,
     pub line_34_data: lcd::ScrollData,
     pub time_started_playing_current_station: chrono::DateTime<Utc>,
-
     /// Stores channel_file_data, organisation, a vec of startion URLs & whether or not the last track is a ding
     pub position_and_duration: [RealTimeDataOnOneChannel; NUMBER_OF_POSSIBLE_CHANNELS + 2], // +1 so there is a channel to play the startup ding
 }
@@ -88,6 +89,9 @@ impl PlayerStatus {
             current_volume: config.initial_volume,
             gstreamer_state: gstreamer::State::Null,
             buffering_percent: 0,
+            podcast_data_from_toml: PodcastDataAllStations {
+                podcast_data_for_all_stations: Vec::new(),
+            },
             latest_podcast_string: None,
             network_data: NetworkData::new(),
             ping_data: ping::PingData::new(),
@@ -163,21 +167,11 @@ impl PlayerStatus {
         writeln!(report, "startup folder\t\t{}", self.startup_folder)?;
         writeln!(report, "channel_number\t\t{}", self.channel_number)?;
         writeln!(report, "current_volume\t\t{}", self.current_volume)?;
-        if let Some(podcast_string) = &self.latest_podcast_string
-            && podcast_string.chars().count() > 201
-        {
-            writeln!(
-                report,
-                "latest_podcast_string\t{} ...",
-                podcast_string[0..200].to_string()
-            )?;
-        } else {
-            writeln!(
-                report,
-                "latest_podcast_string\t{:?} ...",
-                self.latest_podcast_string
-            )?;
-        }
+        writeln!(
+            report,
+            "podcast_data_from_toml\t{:?}",
+            self.podcast_data_from_toml
+        )?;
         writeln!(report, "gstreamer_state\t\t{:?}", self.gstreamer_state)?;
         writeln!(report, "buffering_percent\t{}", self.buffering_percent)?;
         writeln!(report, "network_data\t\t{:?}", self.network_data)?;

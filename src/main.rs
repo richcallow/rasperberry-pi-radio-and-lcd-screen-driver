@@ -16,6 +16,7 @@ mod cd_functions;
 mod extract_html;
 mod get_channel_details;
 mod get_config_file_path;
+mod get_stored_podcast_data;
 mod gstreamer_interfaces;
 mod keyboard;
 mod lcd;
@@ -26,20 +27,18 @@ mod read_config;
 mod unmount;
 mod web;
 
+use crate::extract_html::extract;
+use crate::get_channel_details::{ChannelFileDataDecoded, get_ip_address};
+use crate::player_status::{PODCAST_CHANNEL_NUMBER, RealTimeDataOnOneChannel};
 use get_channel_details::store_channel_details_and_implement_them;
 use lcd::get_local_ip_address;
 use lcd::{RunningStatus, ScrollData};
 use ping::{get_ping_time, see_if_there_is_a_ping_response};
 use player_status::NUMBER_OF_POSSIBLE_CHANNELS;
 use player_status::PlayerStatus;
+use serde::{Deserialize, Serialize};
 use string_replace_all::StringReplaceAll;
-use substring::Substring;
 use unmount::unmount_if_needed;
-
-use crate::extract_html::extract;
-use crate::extract_html::extractz;
-use crate::get_channel_details::{ChannelFileDataDecoded, get_ip_address};
-use crate::player_status::{PODCAST_CHANNEL_NUMBER, RealTimeDataOnOneChannel};
 
 #[macro_export]
 macro_rules! my_dbg {
@@ -74,6 +73,37 @@ enum Event {
     Ticker(tokio::time::Instant),
 }
 
+/// URL of RSS & title as stored in playlists.toml file entry
+/// one per station.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct PodcastDataFromToml {
+    pub title: String,
+    pub url: String,
+}
+
+/// data downloaded from internet for a single podcast in the downloaded series of podcasts
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct DataForOnePodcast {
+    pub date: String,
+    pub subtitle: String,
+    pub summary: String,
+    pub url: String,
+}
+
+/// data downloaded from internet for the downloaded series of podcasts
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct EpisodeDataForOnePodcastDownloaded {
+    pub channel_title: String,
+    pub description: String,
+    pub data_for_multiple_episodes: Vec<DataForOnePodcast>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PodcastDataAllStations {
+    pub podcast_data_for_all_stations: Vec<PodcastDataFromToml>,
+}
+
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), String> {
     //    we need async as for example, we will need to wait for input from gstreamer or the keyboard
@@ -89,6 +119,8 @@ async fn main() -> Result<(), String> {
     }
 
     let mut config_file_path = "config.toml".to_string(); // the default file name of the config TOML file
+    let  podcastlists_filename: String = "podcastlists.toml".to_string();
+
     let root_folder;
 
     if let Some(path) = std::env::args().next()
@@ -115,6 +147,12 @@ async fn main() -> Result<(), String> {
     });
 
     let mut status_of_rradio: PlayerStatus = PlayerStatus::new(&config);
+    if let Ok(podcast_data) =
+        get_stored_podcast_data::get_stored_podcast_data(&podcastlists_filename)
+    {
+        status_of_rradio.podcast_data_from_toml = podcast_data;
+    };
+
     status_of_rradio.startup_folder = root_folder;
     if let Some(toml_error_message) = toml_error {
         // if we got an error we should display it; hopefully, toml_error == none
@@ -213,6 +251,11 @@ async fn main() -> Result<(), String> {
                 status_of_rradio.line_1_data.update_if_changed(&toml_error); // convert to be a scrollable message
                 status_of_rradio.toml_error = None;
             }
+            let mut episode_data_for_one_podcast_downloaded = EpisodeDataForOnePodcastDownloaded {
+                channel_title: String::new(),
+                description: String::new(),
+                data_for_multiple_episodes: Vec::new(),
+            };
             loop {
                 if status_of_rradio.ping_data.can_send_ping {
                     //we must get the output
@@ -515,10 +558,7 @@ async fn main() -> Result<(), String> {
                         keyboard::Event::OutputConfigDebug => {
                             status_of_rradio.output_config_information(&config);
                         }
-                        keyboard::Event::OutputRssData => println!(
-                            "\r\nRSS data\r\n{:?}",
-                            status_of_rradio.latest_podcast_string
-                        ),
+                        keyboard::Event::OutputRssData => println!("\r\nRSS data\r\n{:?}", 9999),
                         keyboard::Event::OutputMountFolderContents => {
                             status_of_rradio.output_mount_folder_contents(&config)
                         }
@@ -647,6 +687,185 @@ async fn main() -> Result<(), String> {
                         }
                     }
                     Some(Event::Web(web_event)) => match web_event {
+                        web::Event::EpisodeSelected { episode_index } => {
+                            let url = episode_data_for_one_podcast_downloaded
+                                .data_for_multiple_episodes[episode_index]
+                                .url
+                                .clone();
+                            status_of_rradio.running_status = RunningStatus::RunningNormally;
+                            status_of_rradio.position_and_duration[PODCAST_CHANNEL_NUMBER] =
+                                RealTimeDataOnOneChannel {
+                                    artist: String::new(),
+                                    address_to_ping: get_ip_address(url.clone()),
+                                    index_to_current_track: 0,
+                                    position: ClockTime::ZERO,
+                                    duration: None,
+                                    channel_data: ChannelFileDataDecoded {
+                                        organisation: format!(
+                                            "{} {}",
+                                            episode_data_for_one_podcast_downloaded.channel_title, // eg "the Archers"
+                                            episode_data_for_one_podcast_downloaded
+                                                .data_for_multiple_episodes[episode_index]
+                                                .subtitle
+                                                .clone()
+                                        ),
+                                        source_type: SourceType::UrlList,
+                                        last_track_is_a_ding: false,
+                                        pause_before_playing_ms: None,
+                                        station_urls: vec![url],
+                                        media_details: None,
+                                    },
+                                };
+                            status_of_rradio.channel_number = PODCAST_CHANNEL_NUMBER;
+                            status_of_rradio.initialise_for_new_station();
+                            if let Err(playbin_error_message) =
+                                playbin.play_track(&mut status_of_rradio, &config, &mut lcd, true)
+                            {
+                                status_of_rradio.all_4lines.update_if_changed(
+                                    format!("When playing a track on channel {} got {playbin_error_message}", status_of_rradio.channel_number)
+                                        .as_str());
+                                status_of_rradio.running_status =
+                                    RunningStatus::LongMessageOnAll4Lines;
+                            } else {
+                                // play worked
+
+                                let line2 = generate_line2(&status_of_rradio);
+                                status_of_rradio
+                                    .line_2_data
+                                    .update_if_changed(line2.as_str())
+                            }
+                        }
+                        web::Event::RequestWebPageStartupData {
+                            // we have received a request for the startup data, so send it to the web server
+                            web_page_startup_data_tx,
+                        } => {
+                            let _ = web_page_startup_data_tx.send(web::WebPageStartupData {
+                                // initialise the volume on the web page
+                                volume: status_of_rradio.current_volume,
+                                // set up the dropdown box that allows the user to choose the podcast station
+                                podcast_data_for_all_stations: status_of_rradio
+                                    .podcast_data_from_toml
+                                    .podcast_data_for_all_stations
+                                    .clone(),
+                            });
+                        }
+                        web::Event::PlayPause => {
+                            // user on a web client has hit the play/pause button
+                            let new_state =
+                                if status_of_rradio.gstreamer_state == gstreamer::State::Playing {
+                                    gstreamer::State::Paused
+                                } else {
+                                    gstreamer::State::Playing
+                                };
+                            if let Err(_error_message) = playbin.set_state(new_state) {
+                                eprintln!(
+                                    "Could not set the gstreamer state when user on web client hit play//pause\r"
+                                )
+                            }
+                        }
+
+                        web::Event::PodcastIndexChanged { podcast_index } => {
+                            // the user has changed the podcast they want ie they want "the Archers"
+                            if podcast_index >= 0 {
+                                // check that the value chosen is valid
+                                let wanted_podcast = &status_of_rradio
+                                    .podcast_data_from_toml
+                                    .podcast_data_for_all_stations
+                                    [podcast_index as usize]; // podcast = eg The Archers
+
+                                // next send the URL taken from the podcasts.toml file,
+                                // which should be a list of playable URLs with associated descriptions
+                                match reqwest::get(&wanted_podcast.url).await {
+                                    Ok(podcast_response) => match podcast_response.text().await {
+                                        Ok(podcast_string) => {
+                                            // if we got here, the URL in the TOML file was valid
+                                            // so, now we have extract the data from it
+
+                                            let channel_title = extract(
+                                                podcast_string.as_str(),
+                                                "<title>",
+                                                "</title>",
+                                            );
+                                            let description = extract(
+                                                podcast_string.as_str(),
+                                                "<description><![CDATA[",
+                                                "]]></description>",
+                                            );
+
+                                            let episodes: Vec<&str> =
+                                                podcast_string.split("<item>").collect();
+
+                                            let mut data_for_multiple_podcasts: Vec<
+                                                DataForOnePodcast,
+                                            > = Vec::new();
+
+                                            for episode in &episodes {
+                                                if episode.contains("<enclosure url=") {
+                                                    let date =
+                                                        extract(episode, "<title>", "</title>");
+                                                    let url = extract(
+                                                        episode,
+                                                        "<enclosure url=\"",
+                                                        "\" length",
+                                                    );
+                                                    let subtitle = extract(
+                                                        episode,
+                                                        "<itunes:subtitle>",
+                                                        "</itunes:subtitle>",
+                                                    );
+                                                    let summary = extract(
+                                                        episode,
+                                                        "<itunes:summary><![CDATA[",
+                                                        "]]>",
+                                                    );
+
+                                                    let data_for_one_podcast: DataForOnePodcast =
+                                                        DataForOnePodcast {
+                                                            date: date.to_string(),
+                                                            subtitle: subtitle.to_string(),
+                                                            summary: summary.to_string(),
+                                                            url: url.to_string(),
+                                                        };
+                                                    data_for_multiple_podcasts
+                                                        .push(data_for_one_podcast);
+                                                }
+                                            }
+                                            episode_data_for_one_podcast_downloaded =
+                                                EpisodeDataForOnePodcastDownloaded {
+                                                    channel_title: channel_title.to_string(),
+                                                    description: description.to_string(),
+                                                    data_for_multiple_episodes:
+                                                        data_for_multiple_podcasts,
+                                                };
+
+                                            let _ = web_data_changed_tx.send(
+                                                web::DataChanged::EpisodeDataForOnePodcast {
+                                                    episode_data_for_one_podcast:
+                                                        episode_data_for_one_podcast_downloaded
+                                                            .clone(),
+                                                },
+                                            );
+                                        }
+                                        Err(wait_error) => {
+                                            status_of_rradio.latest_podcast_string = None;
+                                            eprintln!(
+                                                "When waiting for RSS got error {:?}\r",
+                                                wait_error.to_string()
+                                            )
+                                        }
+                                    },
+                                    Err(wait_error2) => {
+                                        status_of_rradio.latest_podcast_string = None;
+                                        eprintln!(
+                                            "When waiting2 for RSS got error {:?}\r",
+                                            wait_error2.to_string()
+                                        )
+                                    }
+                                }
+                            } else {
+                                eprintln!("Empty station selected by user.\r")
+                            }
+                        }
                         web::Event::RequestRRadioStatusReport { report_tx } => {
                             if report_tx
                                 .send(status_of_rradio.generate_rradio_report())
@@ -675,116 +894,57 @@ async fn main() -> Result<(), String> {
                                 gstreamer::ClockTime::from_mseconds(position_ms),
                             );
                         }
-                        web::Event::RssChanged { new_rss } => {
-                            if let Some(podcast_string) = &status_of_rradio.latest_podcast_string {
-                                let channel_title =
-                                    extract(podcast_string, "<channel><title>", "</title>");
-                                let description = extract(
-                                    podcast_string,
-                                    "<description><![CDATA[",
-                                    "]]></description>",
-                                );
-
-                                let podcasts: Vec<&str> =
-                                    podcast_string.split("</itunes:summary>").collect();
-                                my_dbg!(channel_title, description);
-
-                                let mut count = 0;
-                                for podcast in &podcasts {
-                                    if podcast.contains("<enclosure url=") {
-                                        let date = extractz(podcast, "<item><title>", "</title>");
-                                        let url =
-                                            extractz(podcast, "<enclosure url=\"", "\" length");
-                                        let subtitle = extractz(
-                                            podcast,
-                                            "<itunes:subtitle>",
-                                            "</itunes:subtitle>",
-                                        );
-                                        let summary =
-                                            extractz(podcast, "<itunes:summary><![CDATA[", "]]>");
-                                        //my_dbg!(podcast);
-                                        println!(
-                                            "\r\ncount {} date{} subtitle{} url{}\r",
-                                            count, date, subtitle, url
-                                        );
-
-                                        let part_summary = if summary.chars().count() > 200 {
-                                            summary.substring(0, 200)
-                                        } else {
-                                            my_dbg!(summary, podcast);
-                                            summary
-                                        };
-                                        my_dbg!(part_summary);
-                                        count += 1;
-                                    }
-                                }
-                            }
-                        }
                         web::Event::Getrss => {
-                            match reqwest::get("https://podcasts.files.bbci.co.uk/b006qpgr.rss")
-                                .await
-                            {
-                                Ok(podcast_response) => match podcast_response.text().await {
-                                    Ok(podcast_string) => {
-                                        status_of_rradio.latest_podcast_string =
-                                            Some(podcast_string);
-                                    }
-                                    Err(wait_error) => {
-                                        status_of_rradio.latest_podcast_string = None;
-                                        eprintln!(
-                                            "When waiting for RSS got error {:?}\r",
-                                            wait_error.to_string()
-                                        )
-                                    }
-                                },
-                                Err(wait_error2) => {
-                                    status_of_rradio.latest_podcast_string = None;
-                                    eprintln!(
-                                        "When waiting2 for RSS got error {:?}\r",
-                                        wait_error2.to_string()
-                                    )
-                                }
-                            }
+                            my_dbg!("getrss button pressed");
                         }
 
                         web::Event::PodcastText { new_podcast_text } => {
-                            status_of_rradio.running_status = RunningStatus::RunningNormally;
-                            status_of_rradio.position_and_duration[PODCAST_CHANNEL_NUMBER] =
-                                RealTimeDataOnOneChannel {
-                                    artist: String::new(),
-                                    address_to_ping: get_ip_address(new_podcast_text.clone()),
-                                    index_to_current_track: 0,
-                                    position: ClockTime::ZERO,
-                                    duration: None,
-                                    channel_data: ChannelFileDataDecoded {
-                                        organisation: String::new(),
-                                        source_type: SourceType::UrlList,
-                                        last_track_is_a_ding: false,
-                                        pause_before_playing_ms: None,
-                                        station_urls: vec![new_podcast_text],
-                                        media_details: None,
-                                    },
-                                };
-                            status_of_rradio.channel_number = PODCAST_CHANNEL_NUMBER;
-                            status_of_rradio.initialise_for_new_station();
-                            if let Err(playbin_error_message) =
-                                playbin.play_track(&mut status_of_rradio, &config, &mut lcd, true)
+                            //zzzz
+                            if let Ok(podcast_response) =
+                                reqwest::get(new_podcast_text.trim()).await
+                                && let Ok(podcast_string) = podcast_response.text().await
+                                && let Some(channel_title) = is_rss(podcast_string.as_str())
                             {
-                                status_of_rradio.all_4lines.update_if_changed(
-                                    format!("When playing a track on channel {} got {playbin_error_message}", status_of_rradio.channel_number)
-                                        .as_str());
-                                status_of_rradio.running_status =
-                                    RunningStatus::LongMessageOnAll4Lines;
-                            } else {
-                                // play worked
-                                my_dbg!("");
-                                let line2 = generate_line2(&status_of_rradio);
+                                let new_podcast_data = PodcastDataFromToml {
+                                    title: channel_title,
+                                    url: new_podcast_text,
+                                };
                                 status_of_rradio
-                                    .line_2_data
-                                    .update_if_changed(line2.as_str())
+                                    .podcast_data_from_toml
+                                    .podcast_data_for_all_stations
+                                    .push(new_podcast_data);
+                                if let Ok(podcast_data_to_write_to_file) =
+                                    toml::to_string(&status_of_rradio.podcast_data_from_toml)
+                                {
+                                    my_dbg!(&podcast_data_to_write_to_file);
+                                    if let Err(error) =
+                                        get_stored_podcast_data::write_podcast_data_to_file(
+                                            &podcastlists_filename,
+                                            podcast_data_to_write_to_file,
+                                        )
+                                    {
+                                        status_of_rradio.toml_error = Some(format!(
+                                            "Failed to update list of podcasts file, probably due to a programmming error. got error {}",
+                                            error
+                                        ))
+                                    }
+                                } else {
+                                    status_of_rradio.toml_error = Some(
+                                        "Failed to convert & store new podcast data".to_string(),
+                                    )
+                                }
+                            } else {
+                                // we did not get a valid podcast, so hopefully it was a valid URL to play
+                                play_url(
+                                    new_podcast_text.trim().into(),
+                                    &mut status_of_rradio,
+                                    &mut playbin,
+                                    &config,
+                                    &mut lcd,
+                                );
                             }
                         }
-                        //  http://open.live.bbc.co.uk/mediaselector/6/redir/version/2.0/mediaset/audio-nondrm-download-rss/proto/http/vpid/p0mksps9.mp3
+
                         web::Event::SliderMoved { value } => {
                             println!("new slider value {}\r", value)
                         }
@@ -900,7 +1060,8 @@ pub fn generate_line2(status_of_rradio: &PlayerStatus) -> String {
                 .last_track_is_a_ding
             {
                 num_tracks -= 1
-            }
+            } //  http://open.live.bbc.co.uk/mediaselector/6/redir/version/2.0/mediaset/audio-nondrm-download-rss/proto/http/vpid/p0mksps9.mp3
+
             format!(
                 "{} ({} of {})",
                 status_of_rradio.position_and_duration[status_of_rradio.channel_number]
@@ -982,4 +1143,60 @@ fn change_volume(
     }
 
     let _ = data_changed_tx.send(web::DataChanged::Volume(status_of_rradio.current_volume));
+}
+
+/// work out if a podcast string is an RSS feed
+pub fn is_rss(podcast_string: &str) -> Option<String> {
+    if podcast_string.contains("<rss version") | podcast_string.contains("xmlns:atom") {
+        Some(extract(podcast_string, "<title>", "</title>").to_string())
+    } else {
+        None
+    }
+}
+//zzzz
+
+/// given a playable URL, it plays it
+/// a sample url is http://as-hls-ww-live.akamaized.net/pool_55057080/live/ww/bbc_radio_fourfm/bbc_radio_fourfm.isml/bbc_radio_fourfm-audio%3d128000.norewind.m3u8
+pub fn play_url(
+    new_podcast_text: String,
+    status_of_rradio: &mut PlayerStatus,
+    playbin: &mut PlaybinElement,
+    config: &crate::read_config::Config,
+    lcd: &mut crate::lcd::Lc,
+) {
+    status_of_rradio.running_status = RunningStatus::RunningNormally;
+    status_of_rradio.position_and_duration[PODCAST_CHANNEL_NUMBER] = RealTimeDataOnOneChannel {
+        artist: String::new(),
+        address_to_ping: get_ip_address(new_podcast_text.clone()),
+        index_to_current_track: 0,
+        position: ClockTime::ZERO,
+        duration: None,
+        channel_data: ChannelFileDataDecoded {
+            organisation: String::new(),
+            source_type: SourceType::UrlList,
+            last_track_is_a_ding: false,
+            pause_before_playing_ms: None,
+            station_urls: vec![new_podcast_text],
+            media_details: None,
+        },
+    };
+
+    status_of_rradio.channel_number = PODCAST_CHANNEL_NUMBER;
+    status_of_rradio.initialise_for_new_station();
+    if let Err(playbin_error_message) = playbin.play_track(status_of_rradio, config, lcd, true) {
+        status_of_rradio.all_4lines.update_if_changed(
+            format!(
+                "When playing a track on channel {} got {playbin_error_message}",
+                status_of_rradio.channel_number
+            )
+            .as_str(),
+        );
+        status_of_rradio.running_status = RunningStatus::LongMessageOnAll4Lines;
+    } else {
+        // play worked
+        let line2 = generate_line2(status_of_rradio);
+        status_of_rradio
+            .line_2_data
+            .update_if_changed(line2.as_str())
+    }
 }

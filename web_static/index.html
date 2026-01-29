@@ -11,39 +11,40 @@
     <script src="index.js"></script>
 </head>
 
-<body hx-ext="sse" sse-connect="/api/test-events">
-    <h1>A Page</h1>
-    <p>This is content</p>
+<body hx-ext="sse" sse-connect="/api/main-page-events">
+    <h1> <Center>Experimental version of new RRadio</Center></h1>
+    <div>
+        <Center>
+       <button hx-post="/api/playpause" hx-swap="none">⏯</button>   <!-- playpause-->
 
-     <div> 
-        <input type="text" name="new_rss" hx-post="/api/new-rss" hx-trigger="input" style='width:70em' value = "RSS here">
-    <!---<input type="text" name="new_podcast_rsi" hx-post="/api/podcast-rsi" hx-trigger="paste"> -->
-        <!-- When you click the RSS button, send a POST request to "get-rss" and ignore the response -->
-        <button hx-post="/api/get-rss" hx-swap="none">get RSS data</button>     
+       <!-- When you click the volume down button, send a POST request to "volume-down" and ignore the response -->
+        <button  hx-post="/api/volume-down" hx-swap="none">Volume down 🔉</button>
+        <span sse-swap="volume-changed">INIT VOLUME</span>
+        
+        <!-- When you click the volume up button, send a POST request to "volume-up" and ignore the response -->
+        <button hx-post="/api/volume-up" hx-swap="none">Volume up 🔊</button>
+        </Center>
+    </div>
+
+    <div>
+        <!-- When move the slider, send a POST request to "slider-move" and insert the contents of the response 
+         (i.e. what's inside the root element) in the next "output" -->
+        <input type="range" name="value" min="0" max="100" hx-post="/api/slider-move" hx-swap="none"  hx-target="next output">
+        <output>moving this slider does not do anything except output the slider position.</output> 
+    </div>
+
+    <div>
+        <div sse-swap="position-changed">INIT POSITION</div>
     </div>
 
     <div> 
-        <input type="text" name="new_podcast_text" hx-post="/api/podcast-text" hx-trigger="input" style='width:70em' value = "Pasting a URL in this box will play the URL">
+        <input type="text" name="new_podcast_text" hx-post="/api/podcast-text" hx-trigger="input" style='width:80%' 
+            value = "Pasting a URL in this box will play the URL">
+            <span sse-swap="podcast-changed-by-user">INIT PODCAST</span>  
     </div>
-
-
-
+    <hr>
     <div>
-        <!-- When you click the volume down button, send a POST request to "volume-down" and ignore the response -->
-        <button hx-post="/api/volume-down" hx-swap="none">Volume down</button>
-        <span sse-swap="volume-changed">INIT VOLUME</span>
-        <!-- When you click the volume up button, send a POST request to "volume-up" and ignore the response -->
-        <button hx-post="/api/volume-up" hx-swap="none">Volume up</button>
-    </div>
-
-    <div>
-        <!-- When move the slider, send a POST request to "slider-move" and insert the contents of the response (i.e. what's inside the root element) in the next "output" -->
-        <input type="range" name="value" min="0" max="100" hx-post="/api/slider-move" hx-target="next output">
-        <output></output>
-    </div>
-
-    <div>
-        <div sse-swap="position-changed">INIT</div>
+         <span sse-swap="list-of-episodes">list of episodes will be here</span>
     </div>
 </body>
 

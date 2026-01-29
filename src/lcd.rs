@@ -11,7 +11,7 @@ use std::{
 };
 
 use crate::{
-    get_channel_details::{self, SourceType}, my_dbg, ping::PingTimeAndDestination, player_status
+    get_channel_details::{self, SourceType}, ping::PingTimeAndDestination, player_status
 };
 use anyhow::Context;
 use substring::Substring;
