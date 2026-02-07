@@ -90,6 +90,7 @@ pub enum Event {
     PodcastText {
         new_podcast_text: String,
     },
+        DeletePodcast,
 }
 
 use crate::{EpisodeDataForOnePodcastDownloaded, my_dbg};
@@ -255,24 +256,38 @@ fn render_events_data_changed(
 
         DataChanged::EpisodeDataForOnePodcast { episode_data_for_one_podcast } => {
             // Create the SSE Event which will be returned (inside OK(...))
-                       
-            axum::response::sse::Event::default()
+            if !episode_data_for_one_podcast.data_for_multiple_episodes.is_empty() {
+                axum::response::sse::Event::default()
                 .event("list-of-episodes")
                 .data(
-                    maud::html!{ center{label { h2{ "podcast" (episode_data_for_one_podcast.channel_title) }}
-                        p { (episode_data_for_one_podcast.description)}}
+                    maud::html!{ 
+                        center{
+                        label { h2{ "podcast" (episode_data_for_one_podcast.channel_title) }}
+                        p { ( format!("{}    .", episode_data_for_one_podcast.description)) 
+                        button hx-post="/api/delete-podcast" hx-swap="none" background-color=  (255) {
+                            ( format!("Delete {} podcast", episode_data_for_one_podcast.channel_title))}}
+                        }
                         p { @for count in 0.. episode_data_for_one_podcast.data_for_multiple_episodes.len() {                       
                             p {(episode_data_for_one_podcast.data_for_multiple_episodes[count].date)}
                             p {(episode_data_for_one_podcast.data_for_multiple_episodes[count].summary)}
-                            P { button  hx-post ="/api/list-of-episodes" hx-swap= "none" name ="episode_index" value = (count) 
-                            { "Stream   " (episode_data_for_one_podcast.data_for_multiple_episodes[count].subtitle)} }
+                            P { button hx-post ="/api/list-of-episodes" hx-swap= "none" name ="episode_index" value = (count) 
+                                { "Stream   " (episode_data_for_one_podcast.data_for_multiple_episodes[count].subtitle)} }
                             } // end of for loop content
                         } // end of for
-
                     }  
-                        .render()
-                        .into_string(),
-                )            
+                    .render().into_string(),) // end of .data(
+                }
+            else { //there was no data to display
+                axum::response::sse::Event::default()
+                    .event("list-of-episodes")
+                    .data(maud::html!{
+                                center{label { h2{(episode_data_for_one_podcast.channel_title)
+                                }      
+                            }   
+                        }
+                    }  
+                    .render().into_string(),)
+            }        
         },
 
         DataChanged::Volume(volume) => {
@@ -439,7 +454,12 @@ pub fn start_server() -> (
                     _ = events_tx.send(Event::VolumeDownPressed);
                 }),
             )
-
+            .route(
+                "/delete-podcast", // user wants to delete the current podcast
+                post(async |EventsTx { events_tx }| {
+                    _ = events_tx.send(Event::DeletePodcast);
+                }),
+            )
 
             .route(
                 "/list-of-episodes",

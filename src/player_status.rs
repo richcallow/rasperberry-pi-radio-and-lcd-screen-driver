@@ -66,6 +66,8 @@ pub struct PlayerStatus {
     pub buffering_percent: i32,
     pub podcast_data_from_toml: PodcastDataAllStations,
     pub latest_podcast_string: Option<String>,
+    /// index_of_podcast, as in which podcast has been selected
+    pub podcast_index: i32,
     /// stores SSID, local IP address & gateway address
     pub network_data: get_local_ip_address::NetworkData,
     pub ping_data: ping::PingData,
@@ -93,6 +95,7 @@ impl PlayerStatus {
                 podcast_data_for_all_stations: Vec::new(),
             },
             latest_podcast_string: None,
+            podcast_index: 0, // 0 is the index value of the not-selected value
             network_data: NetworkData::new(),
             ping_data: ping::PingData::new(),
             all_4lines: lcd::ScrollData::new("", 4),
@@ -172,6 +175,7 @@ impl PlayerStatus {
             "podcast_data_from_toml\t{:?}",
             self.podcast_data_from_toml
         )?;
+        writeln!(report, "self.podcast_index\t{}", self.podcast_index)?;
         writeln!(report, "gstreamer_state\t\t{:?}", self.gstreamer_state)?;
         writeln!(report, "buffering_percent\t{}", self.buffering_percent)?;
         writeln!(report, "network_data\t\t{:?}", self.network_data)?;
