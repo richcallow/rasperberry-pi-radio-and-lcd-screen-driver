@@ -27,18 +27,11 @@
     </div>
 
     <div>
-        <!-- When move the slider, send a POST request to "slider-move" and insert the contents of the response 
-         (i.e. what's inside the root element) in the next "output" -->
-        <input type="range" name="value" min="0" max="100" hx-post="/api/slider-move" hx-swap="none"  hx-target="next output">
-        <output>moving this slider does not do anything except output the slider position.</output> 
-    </div>
-
-    <div>
-        <div sse-swap="position-changed">INIT POSITION</div>
+        <div style='width:80%' sse-swap="position-changed" >INIT POSITION</div>  
     </div>
 
     <div> 
-        <input type="text" name="new_podcast_text" hx-post="/api/podcast-text" hx-trigger="input" style='width:80%' 
+        <input type="text" name="new_podcast_text" hx-post="/api/podcast-text" hx-trigger="input" style='width:70%' 
             value = "Pasting a URL in this box will play the URL">
             <span sse-swap="podcast-changed-by-user">INIT PODCAST</span>  
     </div>

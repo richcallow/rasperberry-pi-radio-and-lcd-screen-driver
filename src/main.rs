@@ -30,7 +30,9 @@ mod web;
 
 use crate::extract_html::extract;
 use crate::get_channel_details::{ChannelFileDataDecoded, get_ip_address};
+use crate::lcd::get_mute_state::get_mute_state;
 use crate::player_status::{PODCAST_CHANNEL_NUMBER, RealTimeDataOnOneChannel};
+use crate::web::DataChanged;
 use get_channel_details::store_channel_details_and_implement_them;
 use lcd::get_local_ip_address;
 use lcd::{RunningStatus, ScrollData};
@@ -477,6 +479,11 @@ async fn main() -> Result<(), String> {
                                         &mut lcd,
                                     )
                                 {
+                                    write_status_to_web_page(
+                                        format!("{:?}", the_channel_error_events),
+                                        String::new(),
+                                        &web_data_changed_tx,
+                                    );
                                     match the_channel_error_events {
                                         ChannelErrorEvents::CouldNotFindChannelFile => {
                                             status_of_rradio.toml_error = None; // clear the TOML error out, the user must have seen it by now
@@ -547,18 +554,12 @@ async fn main() -> Result<(), String> {
                                 status_of_rradio
                                     .line_2_data
                                     .update_if_changed(line2.as_str());
-                                let _ = web_data_changed_tx.send(
-                                    web::DataChanged::EpisodeDataForOnePodcast {
-                                        episode_data_for_one_podcast:
-                                            EpisodeDataForOnePodcastDownloaded {
-                                                channel_title: line2,
-                                                description: status_of_rradio.position_and_duration
-                                                    [channel_number]
-                                                    .artist
-                                                    .clone(),
-                                                data_for_multiple_episodes: vec![],
-                                            },
-                                    },
+                                write_status_to_web_page(
+                                    line2,
+                                    status_of_rradio.position_and_duration[channel_number]
+                                        .artist
+                                        .clone(),
+                                    &web_data_changed_tx,
                                 );
                             }
                         }
@@ -785,17 +786,11 @@ async fn main() -> Result<(), String> {
                         web::Event::PodcastIndexChanged { podcast_index } => {
                             // the user has changed the podcast they want ie they want "the Archers"
                             if podcast_index >= 0 {
-                                let _ = web_data_changed_tx.send(
-                                    web::DataChanged::EpisodeDataForOnePodcast {
-                                        episode_data_for_one_podcast:
-                                            EpisodeDataForOnePodcastDownloaded {
-                                                channel_title: "Waiting for the data".to_string(),
-                                                description: String::new(),
-                                                data_for_multiple_episodes: vec![],
-                                            },
-                                    },
+                                write_status_to_web_page(
+                                    "Waiting for the data".to_string(),
+                                    String::new(),
+                                    &web_data_changed_tx,
                                 );
-
                                 // check that the value chosen is valid
                                 let wanted_podcast = &status_of_rradio
                                     .podcast_data_from_toml
@@ -895,16 +890,10 @@ async fn main() -> Result<(), String> {
                                     }
                                 }
                             } else {
-                                eprintln!("Empty station selected by user.\r");
-                                let _ = web_data_changed_tx.send(
-                                    web::DataChanged::EpisodeDataForOnePodcast {
-                                        episode_data_for_one_podcast:
-                                            EpisodeDataForOnePodcastDownloaded {
-                                                channel_title: "No podcast selected".to_string(),
-                                                description: String::new(),
-                                                data_for_multiple_episodes: vec![],
-                                            },
-                                    },
+                                write_status_to_web_page(
+                                    "No podcast selected".to_string(),
+                                    String::new(),
+                                    &web_data_changed_tx,
                                 );
                             }
                         }
@@ -949,17 +938,10 @@ async fn main() -> Result<(), String> {
                                                     .podcast_data_for_all_stations
                                                     .clone(),
                                             });
-                                        // note
-                                        let _ = web_data_changed_tx.send(
-                                            web::DataChanged::EpisodeDataForOnePodcast {
-                                                episode_data_for_one_podcast:
-                                                    EpisodeDataForOnePodcastDownloaded {
-                                                        channel_title: "No Podcast selected"
-                                                            .to_string(),
-                                                        description: String::new(),
-                                                        data_for_multiple_episodes: vec![],
-                                                    },
-                                            },
+                                        write_status_to_web_page(
+                                            "No Podcast selected".to_string(),
+                                            String::new(),
+                                            &web_data_changed_tx,
                                         );
                                     }
                                 }
@@ -983,88 +965,105 @@ async fn main() -> Result<(), String> {
                                 gstreamer::ClockTime::from_mseconds(position_ms),
                             );
                         }
-                        web::Event::Getrss => {
-                            my_dbg!("getrss button pressed");
-                        }
 
                         web::Event::PodcastText { new_podcast_text } => {
-                            //zzzz
-                            let _ = web_data_changed_tx.send(
-                                web::DataChanged::EpisodeDataForOnePodcast {
-                                    episode_data_for_one_podcast:
-                                        EpisodeDataForOnePodcastDownloaded {
-                                            channel_title: "Looking for RSS data".to_string(),
-                                            description: String::new(),
-                                            data_for_multiple_episodes: vec![],
-                                        },
-                                },
-                            );
+                            if new_podcast_text.len() > 2 {
+                                use reqwest::header::CONTENT_TYPE;
+                                match reqwest::get(new_podcast_text.trim()).await {
+                                    Ok(response) => {
+                                        if let Some(header) = response.headers().get(CONTENT_TYPE) {
+                                            if let Ok(content_type) = header.to_str() {
+                                                if content_type.starts_with("audio/") {
+                                                    write_status_to_web_page(
+                                                        format!("Playing {}", new_podcast_text),
+                                                        String::new(),
+                                                        &web_data_changed_tx,
+                                                    );
 
-                            if let Ok(podcast_response) =
-                                reqwest::get(new_podcast_text.trim()).await
-                                && let Ok(podcast_string) = podcast_response.text().await
-                                && let Some(channel_title) = is_rss(podcast_string.as_str())
-                            {
-                                let new_podcast_data = PodcastDataFromToml {
-                                    title: channel_title.clone(),
-                                    url: new_podcast_text,
+                                                    play_urls::play_url(
+                                                        // we have got a URL that should be played
+                                                        new_podcast_text.trim().into(),
+                                                        &mut status_of_rradio,
+                                                        &mut playbin,
+                                                        &config,
+                                                        &mut lcd,
+                                                    );
+                                                } else if !content_type
+                                                    .starts_with("application/xml")
+                                                {
+                                                    // we have probably got an RSS feed, but we need to check it
+                                                    if let Ok(podcast_string) =
+                                                        response.text().await
+                                                        && let Some(channel_title) =
+                                                            is_rss(podcast_string.as_str())
+                                                    {
+                                                        // form the new podcast data
+                                                        let new_podcast_data =
+                                                            PodcastDataFromToml {
+                                                                title: channel_title.clone(),
+                                                                url: new_podcast_text,
+                                                            };
+                                                        status_of_rradio
+                                                            .podcast_data_from_toml
+                                                            .podcast_data_for_all_stations
+                                                            .push(new_podcast_data); // & store it in the vec
+
+                                                        if let Ok(()) = get_stored_podcast_data::write_podcast_data_to_file(
+                                                    &podcastlists_filename,
+                                                    &mut status_of_rradio,  // we have successfully stored the new podcast data
+                                                    )   {
+                                                        let _ = web_data_changed_tx.send(web::DataChanged::Podcast {
+                                                            podcast_data_from_toml: status_of_rradio
+                                                                .podcast_data_from_toml
+                                                                .podcast_data_for_all_stations
+                                                                .clone(),
+                                                        });
+                                                        write_status_to_web_page(format!(
+                                                            "Stored RSS data for \"{}\"",
+                                                            channel_title
+                                                        ), String::new(), &web_data_changed_tx);
+                                                    }
+                                                    } else {
+                                                        write_status_to_web_page(
+                                                            "Could not get podcast data"
+                                                                .to_string(),
+                                                            String::new(),
+                                                            &web_data_changed_tx,
+                                                        );
+                                                    }
+                                                } else {
+                                                    write_status_to_web_page(
+                                                        format!(
+                                                            "Unknown mime type {}",
+                                                            content_type
+                                                        ),
+                                                        String::new(),
+                                                        &web_data_changed_tx,
+                                                    )
+                                                }
+                                            } else {
+                                                write_status_to_web_page(
+                                                "Ignoring your request as could not get mime header type".to_string(), 
+                                                String::new(), &web_data_changed_tx);
+                                            }
+                                        } else {
+                                            write_status_to_web_page(
+                                            "Ignoring your request as no header information in the data you supplied".to_string(),
+                                            String::new(), &web_data_changed_tx);
+                                        }
+                                    }
+                                    Err(_) => {
+                                        write_status_to_web_page(
+                                            "Invalid input on web page".to_string(),
+                                            String::new(),
+                                            &web_data_changed_tx,
+                                        );
+                                    }
                                 };
-                                status_of_rradio
-                                    .podcast_data_from_toml
-                                    .podcast_data_for_all_stations
-                                    .push(new_podcast_data);
-
-                                if let Ok(()) = get_stored_podcast_data::write_podcast_data_to_file(
-                                    &podcastlists_filename,
-                                    &mut status_of_rradio,
-                                ) {
-                                    let _ = web_data_changed_tx.send(web::DataChanged::Podcast {
-                                        podcast_data_from_toml: status_of_rradio
-                                            .podcast_data_from_toml
-                                            .podcast_data_for_all_stations
-                                            .clone(),
-                                    });
-                                    let _ = web_data_changed_tx.send(
-                                        web::DataChanged::EpisodeDataForOnePodcast {
-                                            episode_data_for_one_podcast:
-                                                EpisodeDataForOnePodcastDownloaded {
-                                                    channel_title: format!(
-                                                        "Stored RSS data for \"{}\"",
-                                                        channel_title
-                                                    ),
-                                                    description: String::new(),
-                                                    data_for_multiple_episodes: vec![],
-                                                },
-                                        },
-                                    );
-                                } else {
-                                    let _ = web_data_changed_tx.send(
-                                        web::DataChanged::EpisodeDataForOnePodcast {
-                                            episode_data_for_one_podcast:
-                                                EpisodeDataForOnePodcastDownloaded {
-                                                    channel_title: "Failed to store new RSS data"
-                                                        .to_string(),
-                                                    description: String::new(),
-                                                    data_for_multiple_episodes: vec![],
-                                                },
-                                        },
-                                    );
-                                }
-                            } else {
-                                // we did not get a valid podcast, so hopefully it was a valid URL to play
-                                play_urls::play_url(
-                                    new_podcast_text.trim().into(),
-                                    &mut status_of_rradio,
-                                    &mut playbin,
-                                    &config,
-                                    &mut lcd,
-                                );
+                            } else if let Ok(channel_number) = new_podcast_text.parse::<usize>() {
+                                my_dbg!(format!("we should play channel{}", channel_number))
                             }
-                        }
-
-                        web::Event::SliderMoved { value } => {
-                            println!("new slider value {}\r", value)
-                        }
+                        } // else do nothing as either the user is in the process of entering a valid channel or the input is obviously wrong
                     },
                     Some(Event::Ticker(_now)) => {
                         if status_of_rradio.channel_number
@@ -1201,7 +1200,8 @@ pub fn generate_line2(status_of_rradio: &PlayerStatus) -> String {
     if throttled_status.pi_is_throttled {
         line2 = format!("{line2} {}", throttled_status.result)
     };
-    line2
+
+    format!("{} {}", line2, get_mute_state())
 }
 
 /// Plays the next track by modulo incrementing status_of_rradio.index_to_current_track
@@ -1262,7 +1262,6 @@ fn change_volume(
     let _ = data_changed_tx.send(web::DataChanged::Volume(status_of_rradio.current_volume));
 }
 
-//zzzz
 /// Work out if a podcast string is an RSS feed, & if it is, return the name of the podcast
 /// after de-escaping it
 pub fn is_rss(podcast_string: &str) -> Option<String> {
@@ -1282,4 +1281,19 @@ pub fn decode_html(html_string: &str) -> String {
     } else {
         html_string.to_string()
     }
+}
+
+/// write a status message to the web page after webpage use
+fn write_status_to_web_page(
+    main_message: String,
+    secondary_message: String,
+    web_data_changed_tx: &tokio::sync::broadcast::Sender<DataChanged>,
+) {
+    let _ = web_data_changed_tx.send(web::DataChanged::EpisodeDataForOnePodcast {
+        episode_data_for_one_podcast: EpisodeDataForOnePodcastDownloaded {
+            channel_title: main_message,
+            description: secondary_message,
+            data_for_multiple_episodes: vec![],
+        },
+    });
 }

@@ -1,6 +1,4 @@
 
-use crate::my_dbg;
-
 /// Given an input str, a start pattern & an end pattern extracts & returns the str, if any,
 /// between the two.
 /// If either the start pattern or the end pattern  is not found, returns an empty str.

@@ -12,11 +12,6 @@ use axum::{
 use gstreamer::ClockTime;
 use tokio::sync::oneshot;
 
-#[derive(serde::Deserialize)]
-struct SliderValue {
-    value: i32,
-}
-
 /// Gives the index number of the episode that a user has selected.
 #[derive(serde::Deserialize)]
 struct EpisodeSelected {
@@ -53,23 +48,16 @@ pub enum Event {
     /// so forward the request to the main program
     RequestWebPageStartupData{web_page_startup_data_tx : oneshot::Sender<WebPageStartupData>},
 
-    SliderMoved {
-        value: i32,
-    },
-
     /// User has specified the episode wanted, so forward that to the main program
     EpisodeSelected {
     /// Gives the index number of the episode that a user has selected.
-       episode_index: usize,
-    },
+       episode_index: usize,    },
 
     /// Received when client side requests structure holding the program status,
     /// typically when the page is loaded
     RequestRRadioStatusReport {
         report_tx: oneshot::Sender<Result<String, std::fmt::Error>>,
     },
-    /// get the RSS data & decode it.
-    Getrss,
     
     /// user has pressed the volume down button, so inform the main program
     VolumeDownPressed,
@@ -93,7 +81,7 @@ pub enum Event {
         DeletePodcast,
 }
 
-use crate::{EpisodeDataForOnePodcastDownloaded, my_dbg};
+use crate::{EpisodeDataForOnePodcastDownloaded};
 
 use super::PodcastDataFromToml;
 
@@ -257,6 +245,7 @@ fn render_events_data_changed(
         DataChanged::EpisodeDataForOnePodcast { episode_data_for_one_podcast } => {
             // Create the SSE Event which will be returned (inside OK(...))
             if !episode_data_for_one_podcast.data_for_multiple_episodes.is_empty() {
+                
                 axum::response::sse::Event::default()
                 .event("list-of-episodes")
                 .data(
@@ -417,14 +406,6 @@ pub fn start_server() -> (
 
                 }),
             )
-
-
-            .route(
-                "/get-rss",
-                post(async |EventsTx { events_tx }| {
-                    _ = events_tx.send(Event::Getrss);
-                }),
-            )
             .route(
                 "/podcast-text",
                 post(
@@ -468,21 +449,6 @@ pub fn start_server() -> (
                         _ = events_tx.send(Event::EpisodeSelected { episode_index });
 
   
-                    },
-                ),
-            )            
-            .route(
-                "/slider-move",
-                post(
-                    async |EventsTx { events_tx }, axum::Form(SliderValue { value })| {
-                        _ = events_tx.send(Event::SliderMoved { value });
-
-                        // Generate a HTML snippet using a templating engine, see https://maud.lambda.xyz/
-                        maud::html! {
-                            div {
-                                "Slider position: does not do anything currently" (value)
-                            }
-                        }
                     },
                 ),
             );

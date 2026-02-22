@@ -22,6 +22,7 @@ humantime-serde = "1.1.1"
 libc = "0.2.172"
 maud = { version = "0.27.0", features = ["axum"] }
 memory-serve = "1.2.1"
+mime = "0.3.17"
 nix = { version = "0.31.0", features = ["ioctl", "socket"] }
 rand = "0.9.1"
 reqwest = "0.13.1"

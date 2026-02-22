@@ -176,6 +176,11 @@ impl PlayerStatus {
             self.podcast_data_from_toml
         )?;
         writeln!(report, "self.podcast_index\t{}", self.podcast_index)?;
+        writeln!(
+            report,
+            "latest_podcast_string\t{:?}",
+            self.latest_podcast_string
+        )?;
         writeln!(report, "gstreamer_state\t\t{:?}", self.gstreamer_state)?;
         writeln!(report, "buffering_percent\t{}", self.buffering_percent)?;
         writeln!(report, "network_data\t\t{:?}", self.network_data)?;

@@ -1956,6 +1956,7 @@ dependencies = [
  "libc",
  "maud",
  "memory-serve",
+ "mime",
  "nix 0.31.0",
  "rand",
  "reqwest",
