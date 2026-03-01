@@ -32,6 +32,7 @@ use crate::extract_html::extract;
 use crate::get_channel_details::{ChannelFileDataDecoded, get_ip_address};
 use crate::lcd::get_mute_state::get_mute_state;
 use crate::player_status::{PODCAST_CHANNEL_NUMBER, RealTimeDataOnOneChannel};
+use crate::unmount::unmount_all;
 use crate::web::DataChanged;
 use get_channel_details::store_channel_details_and_implement_them;
 use lcd::get_local_ip_address;
@@ -312,7 +313,9 @@ async fn main() -> Result<(), String> {
                 //Now that we have an event, work out what to do with it
                 match event {
                     None => {
-                        // we are ending the program if we get to here
+                        unmount_all(&mut status_of_rradio);
+                        
+                        /*// we are ending the program if we get to here
                         if let Some(usb_config) = &config.usb
                             && let Err(error) = unmount_if_needed(
                                 &mut status_of_rradio.position_and_duration
@@ -335,7 +338,7 @@ async fn main() -> Result<(), String> {
                                 "Failed to unmount Samba drive when ending program. got {}",
                                 error
                             )
-                        }
+                        }*/
 
                         status_of_rradio.running_status = lcd::RunningStatus::ShuttingDown;
                         lcd.clear();
@@ -577,7 +580,6 @@ async fn main() -> Result<(), String> {
                         keyboard::Event::OutputConfigDebug => {
                             status_of_rradio.output_config_information(&config);
                         }
-                        keyboard::Event::OutputRssData => println!("\r\nRSS data\r\n{:?}", 9999),
                         keyboard::Event::OutputMountFolderContents => {
                             status_of_rradio.output_mount_folder_contents(&config)
                         }
@@ -1095,20 +1097,18 @@ async fn main() -> Result<(), String> {
                     .line_2_data
                     .update_scroll(&config, lcd::NUM_CHARACTERS_PER_LINE);
 
-                let space_needed_for_buffer =
-                    if status_of_rradio.channel_number <= NUMBER_OF_POSSIBLE_CHANNELS {
-                        if status_of_rradio.position_and_duration[status_of_rradio.channel_number]
-                            .channel_data
-                            .source_type
-                            == SourceType::UrlList
-                        {
-                            3 // we need space to display the buffer
-                        } else {
-                            0 // we do not need space as it is not a URL list
-                        }
-                    } else {
-                        0 // we do not need space
-                    };
+                let space_needed_for_buffer = if status_of_rradio.channel_number
+                    <= NUMBER_OF_POSSIBLE_CHANNELS
+                    && status_of_rradio.position_and_duration[status_of_rradio.channel_number]
+                        .channel_data
+                        .source_type
+                        == SourceType::UrlList
+                {
+                    3 // we need space to display the buffer
+                } else {
+                    0 // we do not need space as it is not a URL list
+                };
+
                 status_of_rradio.line_34_data.update_scroll(
                     &config,
                     lcd::NUM_CHARACTERS_PER_LINE * 2 - space_needed_for_buffer,
@@ -1123,7 +1123,7 @@ async fn main() -> Result<(), String> {
             // we need to have a wait on the ping in order to keep the compiler happy
                 && !wait_result.success()
             {
-                eprintln!("Got the errro ping wait status on exit {:?}", wait_result);
+                eprintln!("Got the error ping wait status on exit {:?}", wait_result);
             }
         }
         Err(message) => {
@@ -1176,7 +1176,7 @@ pub fn generate_line2(status_of_rradio: &PlayerStatus) -> String {
                 .last_track_is_a_ding
             {
                 num_tracks -= 1
-            } //  http://open.live.bbc.co.uk/mediaselector/6/redir/version/2.0/mediaset/audio-nondrm-download-rss/proto/http/vpid/p0mksps9.mp3
+            }
 
             format!(
                 "{} ({} of {})",
@@ -1272,8 +1272,7 @@ pub fn is_rss(podcast_string: &str) -> Option<String> {
     }
 }
 
-/// de-escapes an HTML sequence if the input is valid HTML
-/// if it is invalid, it returns the input string unchanged
+/// de-escapes an HTML sequence if the input is valid HTML. If it is invalid, it returns the input string unchanged
 pub fn decode_html(html_string: &str) -> String {
     extern crate htmlescape;
     if let Ok(new_value) = htmlescape::decode_html(html_string) {

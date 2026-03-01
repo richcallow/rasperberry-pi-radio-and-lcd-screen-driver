@@ -21,13 +21,12 @@ struct EpisodeSelected {
 
 /// Gives the index number of the podcast that a user has selected.
 /// used when the user has changed the podcast they want ie they want "the Archers"
-
 #[derive(serde::Deserialize)]
 struct PodcastIndex {
     podcast_index: i32,
 }
 
-
+/// the text enetered by user into the web page
 #[derive(serde::Deserialize)]
 struct PodcastText {
     new_podcast_text: String,
@@ -71,6 +70,7 @@ pub enum Event {
     /// user pressed the initialise <button
     PlayPause,
     VolumeUpPressed,
+
     /// client side wants to set the play position to the given value
     UpdatePosition {
         position_ms: u64,
@@ -82,7 +82,6 @@ pub enum Event {
 }
 
 use crate::{EpisodeDataForOnePodcastDownloaded};
-
 use super::PodcastDataFromToml;
 
 /// Real-time information as sent to client.
@@ -209,7 +208,7 @@ fn render_events_data_changed(
         DataChanged::Podcast {
             podcast_data_from_toml,
         } => {
-            // Create the SSE Event which will be returned (inside OK(...))
+            // Create the Server Side Event (sse) Event which will be returned (inside OK(...))
             axum::response::sse::Event::default()
                 .event("podcast-changed-by-user")
                 .data(

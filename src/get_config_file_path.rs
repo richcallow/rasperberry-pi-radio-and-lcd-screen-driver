@@ -1,3 +1,5 @@
+
+/// given the default TOML file path, decodes the command parameters & returns the path to the config.toml file
 pub fn get_config_file_path(default_toml_path: &String) -> Result<String, String> {
     let mut config_file_path_from_args = String::from(default_toml_path); // the default value if not specified
                                                                           //let config_file_path = {

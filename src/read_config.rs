@@ -77,8 +77,13 @@ pub struct MediaDetails {
     //details of a local memory stick or a Samba device
     /// eg channel_number = 88
     pub channel_number: usize,
-    /// eg  device = "//192.168.0.2/volume(sda1)"
+    /// eg  device = "//192.168.0.2/volume(sda1)" or ""//192.168.0.2" if disk_identifier is specified
     pub device: String,
+
+    /// Name of a file or folder that is on the device to be searched for.
+    /// if this is specified, the program will use smbclient to enumerate all the top level
+    /// files or folders on the sambra share looking for a match
+    pub disk_identifier: Option<String>,
     /// contains username & password
     pub authentication_data: Option<AuthenticationData>,
     /// eg version = "3.0"
@@ -245,6 +250,7 @@ pub fn insert_samba(config: &Config, status_of_rraadio: &mut PlayerStatus) {
                     authentication_data: samba.authentication_data.clone(),
                     version: samba.version.clone(),
                     device: samba.device.clone(),
+                    disk_identifier: samba.disk_identifier.clone(),
                     mount_folder: samba.mount_folder.clone(),
                     is_mounted: false,
                 }),
@@ -273,6 +279,7 @@ pub fn insert_usb(config: &Config, status_of_rraadio: &mut PlayerStatus) {
                     authentication_data: None,
                     version: None,
                     device: usb.device.clone(),
+                    disk_identifier: None,
                     mount_folder: usb.mount_folder.clone(),
                     is_mounted: false,
                 }),
@@ -330,7 +337,7 @@ password = "the password"
 */
 
 /*
-simple channel is as follows
+sample channel is as follows
 
 organisation = "the name "
 station_url = [

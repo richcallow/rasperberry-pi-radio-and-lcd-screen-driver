@@ -352,7 +352,7 @@ impl Lc {
                 // command is ps -C program_name // where program_name is the name of the program 
                     .args(["-C", env!("CARGO_PKG_NAME")])
                     .output()// output.stdout should be three lines, the first, the column headers, 
-                    //& then two lines, one is our PID & the other is the PID of the program we are tryinhg to kill
+                    //& then two lines, one is our PID & the other is the PID of the program we are trying to kill
                 {
                     Ok(output) => {
                         let output_as_a_string =

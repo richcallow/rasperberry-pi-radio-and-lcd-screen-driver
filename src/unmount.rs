@@ -1,4 +1,7 @@
-use crate::player_status::RealTimeDataOnOneChannel;
+use crate::{
+    my_dbg,
+    player_status::{PlayerStatus, RealTimeDataOnOneChannel},
+};
 /// Unmounts whatever device is mounted in the mount folder; returns an error string if it fails
 pub fn unmount_if_needed(
     real_time_data_one_channel: &mut RealTimeDataOnOneChannel,
@@ -27,5 +30,11 @@ pub fn unmount_if_needed(
         Ok(())
     } else {
         Ok(())
+    }
+}
+
+pub fn unmount_all(status_of_rradio: &mut PlayerStatus) {
+    for one_channel in &mut status_of_rradio.position_and_duration {
+        let _ = unmount_if_needed(one_channel);
     }
 }

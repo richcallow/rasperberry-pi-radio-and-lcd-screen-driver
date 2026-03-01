@@ -14,7 +14,6 @@ pub enum Event {
     NextTrack,
     OutputStatusDebug,                     // output the status of rradio
     OutputConfigDebug,                     // output the config info
-    OutputRssData,                         // output the RSS data read from the internet
     OutputMountFolderContents,             // output the contents of the mount folders
     NewLineOnScreen,                       // output a blank line on the screen 
     PlayStation { channel_number: usize }, // channel_number will be  in the range "00" to "99", giving us the number of the station to play
@@ -64,7 +63,6 @@ pub fn setup_keyboard(
                             crossterm::event::KeyCode::Char('-') => Event::PreviousTrack,
                             crossterm::event::KeyCode::Char('+') => Event::NextTrack,
                             crossterm::event::KeyCode::Char('!') => Event::OutputStatusDebug,
-                            crossterm::event::KeyCode::Char('\"') => Event::OutputRssData,
                             crossterm::event::KeyCode::Char('£') => Event::OutputConfigDebug,
                             crossterm::event::KeyCode::Char('$') => Event::OutputMountFolderContents,
                               crossterm::event::KeyCode::Char('^') => Event::NewLineOnScreen,

@@ -80,7 +80,10 @@ pub enum ChannelErrorEvents {
     /// The message returned if the user enters a channel number that does not exist
     CouldNotFindChannelFile,
 
-    /// Could not read the channnels folder (eg \boot\playlists\) that contains all the channel files
+    /// When enumerating the Samba files, could not find a folder or file with the specified name
+    CouldNotFindSambaShareWithFolder(Option<String>),
+
+    /// Could not read the channels folder (eg \boot\playlists\) that contains all the channel files
     CouldNotReadChannelsFolder {
         channels_folder: String,
         error_message: String,
@@ -100,6 +103,9 @@ pub enum ChannelErrorEvents {
         channel_number: usize,
         error_message: String,
     },
+
+    /// Could not enumerate the Samba device
+    CouldNotEnumerateSamba(String),
 
     /// Could not find the album specifed in the play list, possibly because the wrong memory stick is inserted
     CouldNotFindAlbum(String),
@@ -141,7 +147,16 @@ impl ChannelErrorEvents {
     pub fn to_lcd_screen(&self) -> String {
         match &self {
             ChannelErrorEvents::CouldNotFindChannelFile => "CouldNotFindChannelFile".to_string(),
-
+            ChannelErrorEvents::CouldNotFindSambaShareWithFolder(folder_name) => {
+                if let Some(error_message) = folder_name {
+                    format!(
+                        "When enumerating the Samba shares could not find folder/file {}",
+                        error_message
+                    )
+                } else {
+                    "Software bug in error message".to_string()
+                }
+            }
             ChannelErrorEvents::CouldNotParseChannelFile {
                 channel_number,
                 error_message,
@@ -160,11 +175,12 @@ impl ChannelErrorEvents {
                     path_to_channel_file, error_message
                 )
             }
-
+            ChannelErrorEvents::CouldNotEnumerateSamba(error_message) => {
+                format!("Could not enumerate Samba {}", error_message)
+            }
             ChannelErrorEvents::NoSuchDeviceOrDirectory(bad_path) => {
                 format!("Could not find device on path{}", bad_path)
             }
-
             ChannelErrorEvents::CouldNotReadChannelsFolder {
                 channels_folder,
                 error_message,
@@ -177,20 +193,16 @@ impl ChannelErrorEvents {
             ChannelErrorEvents::ErrorReadingFolderEntry { error_message } => {
                 format!("Error reading channel folder entry {}", error_message)
             }
-
             ChannelErrorEvents::NoUSBDevice => "No USB device found".to_string(),
-
             ChannelErrorEvents::UsbMountMountError(error_message) => {
                 format!("When trying to mount a USB device got error {error_message}")
             }
-
             ChannelErrorEvents::USBReadReadError(error_message) => {
                 format!(
                     "When trying to read USB memory stick got error {}",
                     error_message
                 )
             }
-
             ChannelErrorEvents::FailedToOpenCdDrive(error_as_option) => {
                 if let Some(error) = error_as_option {
                     match error {
@@ -205,11 +217,9 @@ impl ChannelErrorEvents {
             ChannelErrorEvents::MediaNotSpecifiedInTomlfile => {
                 "Media not specified in TOML file".to_string()
             }
-
             ChannelErrorEvents::MediaNotMountabletype(source_type) => {
                 format!("{:?} media is not mountable", *source_type)
             }
-
             ChannelErrorEvents::FailedtoGetCDdriveOrDiskStatus(error) => match error {
                 &0 => "No info on CD in drive".to_string(), //CDS_NO_INFO
                 &1 => "no CD in drive.".to_string(),        // CDS_NO_DISC
@@ -226,7 +236,6 @@ impl ChannelErrorEvents {
             ChannelErrorEvents::CouldNotGetNumberOfCDTracks(error) => {
                 format!("When getting number of CD tracks, got error {}", error)
             }
-
             ChannelErrorEvents::NoFilesInArray => {
                 "Probalby hit a bug as there were no files in the array".to_string()
             }
@@ -284,7 +293,7 @@ pub fn get_channel_details_from_mountable_media(
                                         extension.to_string_lossy().to_ascii_lowercase()
                                     });
 
-                                    if let Some("mp3" | "wav" | "ogg" | "flac") =
+                                    if let Some("mp3" | "wav" | "ogg" | "flac" | "m4a") =
                                         file_extension.as_deref()
                                     {
                                         list_of_audio_album_images.push(
@@ -349,7 +358,9 @@ pub fn get_channel_details_from_mountable_media(
                         let file_extension = file_name
                             .extension()
                             .map(|extension| extension.to_string_lossy().to_ascii_lowercase());
-                        if let Some("mp3" | "wav" | "ogg" | "flac") = file_extension.as_deref() {
+                        if let Some("mp3" | "wav" | "ogg" | "flac" | "m4a") =
+                            file_extension.as_deref()
+                        {
                             list_of_wanted_tracks.push(format!("file://{}", audio_fileqq));
                             // we do not use {:?} in the format string as that adds unwanted quotes
                         }
@@ -723,7 +734,7 @@ fn set_up_playlist(
                             {
                                 let file_name_as_os_string = file.file_name();
                                 let file_name = std::path::Path::new(&file_name_as_os_string);
-                                let Some("mp3" | "wav" | "ogg" | "flac") = file_name
+                                let Some("mp3" | "wav" | "ogg" | "flac" | "m4a") = file_name
                                     .extension()
                                     .map(|extension| extension.to_string_lossy().to_lowercase())
                                     .as_deref()
