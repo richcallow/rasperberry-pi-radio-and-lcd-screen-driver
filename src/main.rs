@@ -315,31 +315,6 @@ async fn main() -> Result<(), String> {
                     None => {
                         unmount_all(&mut status_of_rradio);
                         
-                        /*// we are ending the program if we get to here
-                        if let Some(usb_config) = &config.usb
-                            && let Err(error) = unmount_if_needed(
-                                &mut status_of_rradio.position_and_duration
-                                    [usb_config.channel_number],
-                            )
-                        {
-                            eprintln!(
-                                "Failed to unmount local USB stick when ending program. got {}",
-                                error
-                            )
-                        }
-
-                        if let Some(samba_config) = &config.samba
-                            && let Err(error) = unmount_if_needed(
-                                &mut status_of_rradio.position_and_duration
-                                    [samba_config.channel_number],
-                            )
-                        {
-                            eprintln!(
-                                "Failed to unmount Samba drive when ending program. got {}",
-                                error
-                            )
-                        }*/
-
                         status_of_rradio.running_status = lcd::RunningStatus::ShuttingDown;
                         lcd.clear();
                         lcd.write_rradio_status_to_lcd(&status_of_rradio, &config);

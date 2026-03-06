@@ -36,7 +36,7 @@ pub fn mount_media_for_current_channel(
 /// & returns the mount folder if the mount is successful.
 pub fn mount_media(media_details: &mut MediaDetails) -> Result<String, ChannelErrorEvents> {
     if media_details.is_mounted {
-        println!("Device is already mounted {:?}\r", media_details);
+        println!("Device is already mounted {:?}\r", media_details.device);
         return Ok(media_details.mount_folder.clone()); // it is already mounted
     }
 
@@ -121,12 +121,13 @@ fn mount_exact_drive_unknown(
 ) -> Result<String, ChannelErrorEvents> {
     // enumerate the Samba shares using the smbclient command.
     // the format depends on whether or not a password is supplied
+
     let samba_command_as_result = if let Some(auth_data) = &media_details.authentication_data {
         std::process::Command::new("/bin/smbclient")
             .args([
                 "-L",                  // IP address is the next parameter
                 &media_details.device, // the IP address of the Samba share
-                "-g",                  // sets the output format to be one we expect (easier to machine parse)
+                "-g", // sets the output format to be one we expect (easier to machine parse)
                 "-U", // Username & password about to follow, separated by the "%" character
                 format!("{}%{}", auth_data.username, auth_data.password).as_str(),
             ])
@@ -139,25 +140,24 @@ fn mount_exact_drive_unknown(
     match samba_command_as_result {
         Ok(output) => {
             if output.status.success() {
-                let return_string = format!("{}", String::from_utf8_lossy(&output.stdout));
-                let output_as_a_vec_of_lines: Vec<&str> = return_string.split("\n").collect();
+                // we use local_media_details as we want different values to those we received
                 let mut local_media_details = media_details.clone();
-                for one_output_line in output_as_a_vec_of_lines {
+                for one_output_line in String::from_utf8_lossy(&output.stdout).lines() {
                     if one_output_line.starts_with("Disk") {
                         // we have found a Samba share
                         let new_device = format!(
                             "{}{}",
                             media_details.device,
-                            &one_output_line
-                                ["Disk|".len()..one_output_line.len() - 1]
+                            &one_output_line["Disk|".len()..one_output_line.len() - 1]
                         );
                         // at this point, we have found a mountable Samba drive, but we do not know if it is the correct one
                         local_media_details.device = new_device;
-                        local_media_details.disk_identifier = None;
+                        local_media_details.disk_identifier = None; // set to None so we use the simpler mount function 
                         match mount_media(&mut local_media_details) {
                             Ok(mount_folder) => match fs::read_dir(&mount_folder) {
                                 Ok(read_dir) => {
                                     if let Some(disk_identifier) = &media_details.disk_identifier {
+                                        // loking in all the top level files & folders to see if one matches
                                         for folder_as_result in read_dir {
                                             if let Ok(folder) = folder_as_result
                                                 && disk_identifier
@@ -203,7 +203,6 @@ fn mount_exact_drive_unknown(
                     media_details.disk_identifier.clone(),
                 ))
             } else {
-                my_dbg!(output);
                 Err(ChannelErrorEvents::CouldNotEnumerateSamba(
                     "Got error when enumerating Samba clients".to_string(),
                 ))

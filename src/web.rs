@@ -307,7 +307,7 @@ fn render_events_data_changed(
                         ;
                 }
                 .render(), // Render to HTML
-                None => maud::html! { input type="range" disabled; }.render(),
+                None => maud::html! { span; }.render(),
             };
 
             // Create the SSE Event which will be returned (inside OK(...))

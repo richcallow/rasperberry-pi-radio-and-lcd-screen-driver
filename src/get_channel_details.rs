@@ -41,6 +41,14 @@ pub enum SourceType {
     Usb,
 }
 
+pub const LIST_OF_SUPPORTED_FILE_TYPES: &[&str] = &["mp3", "wav", "ogg", "flac", "m4a"];
+
+fn is_supported_file_type(path: &std::path::Path) -> bool {
+    path.extension()
+        .map(|extension| extension.to_string_lossy().to_ascii_lowercase())
+        .is_some_and(|extension| LIST_OF_SUPPORTED_FILE_TYPES.contains(&extension.as_str()))
+}
+
 #[derive(Debug, PartialEq, Clone)]
 /// Decoded data sucessfully read from the station channel file, ie organisaton, source_type,
 /// if the last track is a ding, pause_before_playing_ms, media_details & station_urls as a Vec,
@@ -280,22 +288,15 @@ pub fn get_channel_details_from_mountable_media(
                                             error
                                         ))
                                     })?;
-                                for file_as_result in files {
-                                    let file_entry = file_as_result.map_err(|_error| {
+                                for dir_entry_as_result in files {
+                                    let dir_entry = dir_entry_as_result.map_err(|_error| {
                                         ChannelErrorEvents::USBReadReadError(
                                             "Failed while searching for audio files in folder"
                                                 .to_string(),
                                         )
                                     })?;
-                                    let file_name_as_os_string = file_entry.path();
-                                    let file_name = std::path::Path::new(&file_name_as_os_string);
-                                    let file_extension = file_name.extension().map(|extension| {
-                                        extension.to_string_lossy().to_ascii_lowercase()
-                                    });
 
-                                    if let Some("mp3" | "wav" | "ogg" | "flac" | "m4a") =
-                                        file_extension.as_deref()
-                                    {
+                                    if is_supported_file_type(dir_entry.file_name().as_ref()) {
                                         list_of_audio_album_images.push(
                                             album_dir_entry.path().to_string_lossy().to_string(),
                                         );
@@ -347,21 +348,17 @@ pub fn get_channel_details_from_mountable_media(
                 if let Ok(audio_or_other_type_of_file_dir_entry) = file_as_result {
                     if let Ok(file_type) = audio_or_other_type_of_file_dir_entry.file_type()
                         && file_type.is_file()
-                        && let Some(audio_fileqq) = audio_or_other_type_of_file_dir_entry
+                        && let Some(one_audio_file) = audio_or_other_type_of_file_dir_entry
                             .path()
                             .as_os_str()
                             .to_str()
                     {
                         // got a file not a folder, in the audio files folder. but is it an audio file
-                        let file_name_as_os_string = audio_or_other_type_of_file_dir_entry.path();
-                        let file_name = std::path::Path::new(&file_name_as_os_string);
-                        let file_extension = file_name
-                            .extension()
-                            .map(|extension| extension.to_string_lossy().to_ascii_lowercase());
-                        if let Some("mp3" | "wav" | "ogg" | "flac" | "m4a") =
-                            file_extension.as_deref()
-                        {
-                            list_of_wanted_tracks.push(format!("file://{}", audio_fileqq));
+
+                        if is_supported_file_type(
+                            audio_or_other_type_of_file_dir_entry.file_name().as_ref(),
+                        ) {
+                            list_of_wanted_tracks.push(format!("file://{}", one_audio_file));
                             // we do not use {:?} in the format string as that adds unwanted quotes
                         }
                     }
@@ -731,17 +728,8 @@ fn set_up_playlist(
                             // at this point, the name could be the name of a folder, so next check it is a file
                             if let Ok(file_type) = file.file_type()
                                 && file_type.is_file()
+                                && is_supported_file_type(file.file_name().as_ref())
                             {
-                                let file_name_as_os_string = file.file_name();
-                                let file_name = std::path::Path::new(&file_name_as_os_string);
-                                let Some("mp3" | "wav" | "ogg" | "flac" | "m4a") = file_name
-                                    .extension()
-                                    .map(|extension| extension.to_string_lossy().to_lowercase())
-                                    .as_deref()
-                                else {
-                                    continue;
-                                };
-
                                 list_of_audio_album_images
                                     .push(format!("file://{}", file.path().to_string_lossy()));
                             }
