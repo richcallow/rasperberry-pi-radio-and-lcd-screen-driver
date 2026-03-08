@@ -11,33 +11,32 @@
     <script src="index.js"></script>
 </head>
 
-<body hx-ext="sse" sse-connect="/api/main-page-events">
-    <h1> <Center>Experimental version of new RRadio</Center></h1>
-    <div>
-        <Center>
-       <button hx-post="/api/playpause" hx-swap="none">⏯</button>   <!-- playpause-->
+<body>
+    <div id="app" hx-ext="sse" sse-connect="/api/main-page-events">
+        <div class="flex-col fixed-size">
+            <h1>Experimental version of new RRadio</h1>
+            <div style="font-size: 120%;">             
+                <center>    
+                    <button hx-post="/api/playpause" hx-swap="none">⏯</button>   <!-- playpause-->
+                    <!-- When you click the volume down button, send a POST request to "volume-down" and ignore the response -->
+                    <button  hx-post="/api/volume-down" hx-swap="none">Volume down 🔉</button>
+                    <span sse-swap="volume-changed">INIT VOLUME</span>
 
-       <!-- When you click the volume down button, send a POST request to "volume-down" and ignore the response -->
-        <button  hx-post="/api/volume-down" hx-swap="none">Volume down 🔉</button>
-        <span sse-swap="volume-changed">INIT VOLUME</span>
-        
-        <!-- When you click the volume up button, send a POST request to "volume-up" and ignore the response -->
-        <button hx-post="/api/volume-up" hx-swap="none">Volume up 🔊</button>
-        </Center>
-    </div>
-
-    
-        <div style='width:80%' sse-swap="position-changed" ></div>  
-   
-
-    <div> 
-        <input type="text" name="new_podcast_text" hx-post="/api/podcast-text" hx-trigger="input" style='width:70%' 
-            value = "Pasting a URL in this box will play the URL">
-            <span sse-swap="podcast-changed-by-user">INIT PODCAST</span>  
-    </div>
-    <hr>
-    <div>
-         <span sse-swap="list-of-episodes">list of episodes will be here</span>
+                    <!-- When you click the volume up button, send a POST request to "volume-up" and ignore the response -->
+                    <button hx-post="/api/volume-up" hx-swap="none">Volume up 🔊</button>
+                </center>
+                <div sse-swap="position-changed" ></div>
+                <div class="flex-row">
+                    <div class="grow-and-shrink">
+                        <input type="text" name="new_podcast_text" hx-post="/api/podcast-text" hx-trigger="input" style='width:100%'
+                            value = "Pasting a URL in this box will play the URL or load an RSS">
+                    </div>
+                    <span sse-swap="podcast-changed-by-user">INIT PODCAST</span>
+                </div>
+            </div>
+        </div>
+        <div class="flex-col grow-and-shrink" style="overflow-y: scroll;" sse-swap="list-of-episodes">List of episodes will be here when chosen          
+        </div>
     </div>
 </body>
 

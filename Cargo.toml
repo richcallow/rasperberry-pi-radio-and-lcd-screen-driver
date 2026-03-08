@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-anyhow = "1.0.95" # General Error Type
+anyhow = "1.0.102" # General Error Type
 axum = "0.8.6"
 chrono = "0.4.42"
 compile-time = "0.2.0"
@@ -12,19 +12,19 @@ crossterm = { version ="0.29"  , features = ["event-stream"] }
 eject = "0.1.1"
 env = "1.0.1"
 futures-util = "0.3.31"
-glib = "0.21.3"
-gstreamer = "0.24.2"
-gstreamer-audio = "0.24.2"
+glib = "0.22.2"
+gstreamer = "0.25.1"
+gstreamer-audio = "0.25.0"
 hex = "0.4.3"
 html-macro = "0.2.5"
 htmlescape = "0.3.1"
 humantime-serde = "1.1.1"
 libc = "0.2.172"
 maud = { version = "0.27.0", features = ["axum"] }
-memory-serve = "1.2.1"
+memory-serve = "1.2.2"
 mime = "0.3.17"
 nix = { version = "0.31.0", features = ["ioctl", "socket"] }
-rand = "0.9.1"
+rand = "0.10.0"
 reqwest = "0.13.1"
 rppal = "0.22.1"
 serde = { version = "1.0.193", features = ["derive", "rc"] }
@@ -34,5 +34,5 @@ substring = "1.4"
 sys-mount = "3.0.1"
 tokio = { version = "1.43", features = ["rt", "io-util", "net", "time", "macros", "sync"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
-toml = "0.9.7"
+toml = "1.0.6+spec-1.1.0"
 unidecode = "0.3.0" # encode unicode into lcd screen encoding

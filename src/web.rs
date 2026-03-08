@@ -47,7 +47,7 @@ pub enum Event {
     /// so forward the request to the main program
     RequestWebPageStartupData{web_page_startup_data_tx : oneshot::Sender<WebPageStartupData>},
 
-    /// User has specified the episode wanted, so forward that to the main program
+    /// User has specified the episode wanted, so inform the main program
     EpisodeSelected {
     /// Gives the index number of the episode that a user has selected.
        episode_index: usize,    },
@@ -250,11 +250,11 @@ fn render_events_data_changed(
                 .data(
                     maud::html!{ 
                         center{
-                        label { h2{ "podcast" (episode_data_for_one_podcast.channel_title) }}
-                        p { ( format!("{}    .", episode_data_for_one_podcast.description)) 
-                        button hx-post="/api/delete-podcast" hx-swap="none" background-color=  (255) {
-                            ( format!("Delete {} podcast", episode_data_for_one_podcast.channel_title))}}
-                        }
+                        h2{ "podcast" (episode_data_for_one_podcast.channel_title) }
+                        div { ( format!("qqq{}    .                              ", episode_data_for_one_podcast.description)) 
+                        button hx-post="/api/delete-podcast" hx-swap="none"  background-color=  (25) {
+                            ( format!("Delete {} podcast", episode_data_for_one_podcast.channel_title))}
+                        }}
                         p { @for count in 0.. episode_data_for_one_podcast.data_for_multiple_episodes.len() {                       
                             p {(episode_data_for_one_podcast.data_for_multiple_episodes[count].date)}
                             p {(episode_data_for_one_podcast.data_for_multiple_episodes[count].summary)}
@@ -295,7 +295,8 @@ fn render_events_data_changed(
                         min="0" max=(duration.mseconds()) value=(position.mseconds())
                         // When the slider is moved by the user, send a PUT request
                         // with a form value named "position_ms" with the new slider value.
-                        name="position_ms" hx-put="/api/position" hx-swap="none"
+                        // width is not quite 100% so the users can see the end of slider
+                        name="position_ms" hx-put="/api/position" hx-swap="none" style="width:99.5%"
 
                         // Allows HTMX to not swap out the slider if the user is currently dragging the slider.
                         onpointerdown="this.dataset.dragging = 'true'"
@@ -454,6 +455,14 @@ pub fn start_server() -> (
             
 
         // The top-level application router, called whenever the client makes an HTTP request
+        /*let g= memory_serve::load!().index_file(&"web_static").into_router()
+        .nest("/api", api_router)
+                    .route("/1", get(handle_rradio_status_report))
+         .with_state(ServerState {
+                events_tx: EventsTx { events_tx },
+                data_changed_rx: DataChangedReceiver { data_changed_rx },
+            });
+        */
         let app = memory_serve::MemoryServe::new(memory_serve::load_assets!("web_static"))
             .into_router()
             .nest("/api", api_router) // strip "/api" from the start of the path and forward to "api_router"

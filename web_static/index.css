@@ -1,3 +1,49 @@
 h1 {
-    color: gold;
+     text-align: center;
+     color:blueviolet
 }
+
+button {
+    font-size: inherit;
+}
+
+.flex-row {
+    display: flex;
+    flex-flow: row nowrap;
+    align-items: stretch;
+}
+
+.flex-col {
+    display: flex;
+    flex-flow: column nowrap;
+    align-items: stretch;
+}
+
+.fixed-size {
+    flex-grow: 0;
+    flex-shrink: 0;
+    flex-basis: auto;
+}
+
+.grow-and-shrink {
+    flex-grow: 1;
+    flex-shrink: 1;
+    flex-basis: auto;
+}
+
+#app {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    bottom: 0;
+
+    display: flex;
+    flex-flow: column nowrap;
+    align-items: stretch;
+}
+
+/*div {
+    border: 3px solid purple;
+    padding: 3pt;
+}*/
