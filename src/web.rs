@@ -250,18 +250,21 @@ fn render_events_data_changed(
                 .data(
                     maud::html!{ 
                         center{
-                        h2{ "podcast" (episode_data_for_one_podcast.channel_title) }
-                        div { ( format!("qqq{}    .                              ", episode_data_for_one_podcast.description)) 
-                        button hx-post="/api/delete-podcast" hx-swap="none"  background-color=  (25) {
-                            ( format!("Delete {} podcast", episode_data_for_one_podcast.channel_title))}
-                        }}
-                        p { @for count in 0.. episode_data_for_one_podcast.data_for_multiple_episodes.len() {                       
-                            p {(episode_data_for_one_podcast.data_for_multiple_episodes[count].date)}
-                            p {(episode_data_for_one_podcast.data_for_multiple_episodes[count].summary)}
-                            P { button hx-post ="/api/list-of-episodes" hx-swap= "none" name ="episode_index" value = (count) 
-                                { "Stream   " (episode_data_for_one_podcast.data_for_multiple_episodes[count].subtitle)} }
-                            } // end of for loop content
-                        } // end of for
+                            h2{ "podcast" (episode_data_for_one_podcast.channel_title) }
+                            div { ( format!("qqq{}    .", episode_data_for_one_podcast.description)) 
+                            button hx-post="/api/delete-podcast" hx-swap="none"  background-color=  (25) {
+                                ( format!("Delete {} podcast", episode_data_for_one_podcast.channel_title))}
+                            }
+                            p { @for count in 0.. episode_data_for_one_podcast.data_for_multiple_episodes.len() {                       
+                                p {(episode_data_for_one_podcast.data_for_multiple_episodes[count].date) ("  ")
+                                    (episode_data_for_one_podcast.data_for_multiple_episodes[count].subtitle)}
+                                P { button hx-post ="/api/list-of-episodes" hx-swap= "none" name ="episode_index" value = (count) 
+                                    { "Stream" } }
+                                p {(episode_data_for_one_podcast.data_for_multiple_episodes[count].summary)}
+
+                                } // end of for loop content
+                            } // end of for
+                        }
                     }  
                     .render().into_string(),) // end of .data(
                 }

@@ -167,7 +167,6 @@ async fn main() -> Result<(), String> {
         status_of_rradio.toml_error = Some(toml_error_message);
     }
 
-    read_config::insert_samba(&config, &mut status_of_rradio);
     read_config::insert_usb(&config, &mut status_of_rradio);
 
     // first assume that the WiFi is working and has a valid SSID & Password

@@ -230,34 +230,6 @@ impl Config {
     }
 }
 
-/// inserts the SAMBA details in the Samaba part of status_of_rradio
-pub fn insert_samba(config: &Config, status_of_rraadio: &mut PlayerStatus) {
-    if let Some(samba) = &config.samba {
-        status_of_rraadio.position_and_duration[samba.channel_number] = RealTimeDataOnOneChannel {
-            artist: String::new(),
-            address_to_ping: String::new(),
-            index_to_current_track: 0,
-            duration: None,
-            position: ClockTime::ZERO,
-            channel_data: ChannelFileDataDecoded {
-                organisation: String::new(),
-                last_track_is_a_ding: true,
-                pause_before_playing_ms: None,
-                source_type: crate::get_channel_details::SourceType::Usb,
-                station_urls: vec![],
-                media_details: Some(MediaDetails {
-                    channel_number: samba.channel_number,
-                    authentication_data: samba.authentication_data.clone(),
-                    version: samba.version.clone(),
-                    device: samba.device.clone(),
-                    disk_identifier: samba.disk_identifier.clone(),
-                    mount_folder: samba.mount_folder.clone(),
-                    is_mounted: false,
-                }),
-            },
-        }
-    }
-}
 
 /// inserts the USB details in the USB part of status_of_rradio
 pub fn insert_usb(config: &Config, status_of_rraadio: &mut PlayerStatus) {
