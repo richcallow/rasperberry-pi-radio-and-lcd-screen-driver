@@ -18,6 +18,7 @@ mod get_channel_details;
 mod get_config_file_path;
 mod get_stored_podcast_data;
 mod gstreamer_interfaces;
+mod html_helpers;
 mod keyboard;
 mod lcd;
 mod mount_media;
@@ -313,7 +314,7 @@ async fn main() -> Result<(), String> {
                 match event {
                     None => {
                         unmount_all(&mut status_of_rradio);
-                        
+
                         status_of_rradio.running_status = lcd::RunningStatus::ShuttingDown;
                         lcd.clear();
                         lcd.write_rradio_status_to_lcd(&status_of_rradio, &config);
@@ -430,115 +431,14 @@ async fn main() -> Result<(), String> {
                             next_track(&mut status_of_rradio, &playbin, &config, &mut lcd);
                         }
                         keyboard::Event::PlayStation { channel_number } => {
-                            status_of_rradio.initialise_for_new_station();
-
-                            if channel_number == status_of_rradio.channel_number
-                                && status_of_rradio.running_status == RunningStatus::NoChannel
-                            {
-                                status_of_rradio.running_status = RunningStatus::NoChannelRepeated;
-                            } else {
-                                status_of_rradio.running_status = RunningStatus::RunningNormally;
-                                status_of_rradio.position_and_duration
-                                    [status_of_rradio.channel_number]
-                                    .position = ClockTime::ZERO;
-                                status_of_rradio.line_2_data.update_if_changed("");
-                                status_of_rradio.line_34_data.update_if_changed("");
-                                status_of_rradio.all_4lines.update_if_changed("");
-                                let previous_channel_number = status_of_rradio.channel_number;
-                                status_of_rradio.channel_number = channel_number;
-
-                                if let Err(the_channel_error_events) =
-                                    store_channel_details_and_implement_them(
-                                        &config,
-                                        &mut status_of_rradio,
-                                        &playbin,
-                                        previous_channel_number,
-                                        &mut lcd,
-                                    )
-                                {
-                                    write_status_to_web_page(
-                                        format!("{:?}", the_channel_error_events),
-                                        String::new(),
-                                        &web_data_changed_tx,
-                                    );
-                                    match the_channel_error_events {
-                                        ChannelErrorEvents::CouldNotFindChannelFile => {
-                                            status_of_rradio.toml_error = None; // clear the TOML error out, the user must have seen it by now
-                                            status_of_rradio.running_status =
-                                                if previous_channel_number == channel_number {
-                                                    RunningStatus::NoChannelRepeated
-                                                } else {
-                                                    RunningStatus::NoChannel
-                                                };
-                                            if let Some(ding_filename) =
-                                                &config.aural_notifications.filename_error
-                                            {
-                                                // play a ding if one has been specified
-                                                status_of_rradio.position_and_duration
-                                                    [player_status::START_UP_DING_CHANNEL_NUMBER]
-                                                    .channel_data
-                                                    .station_urls =
-                                                    vec![format!("file://{ding_filename}")];
-                                                let _ignore_error_if_beep_fails = playbin
-                                                    .play_track(
-                                                        &mut status_of_rradio,
-                                                        &config,
-                                                        &mut lcd,
-                                                        false,
-                                                    );
-                                                status_of_rradio.position_and_duration
-                                                    [player_status::START_UP_DING_CHANNEL_NUMBER]
-                                                    .index_to_current_track = 0;
-                                            }
-                                        }
-                                        ChannelErrorEvents::CouldNotParseChannelFile {
-                                            channel_number,
-                                            error_message,
-                                        } => {
-                                            status_of_rradio.toml_error = Some(format!(
-                                                "Could not parse channel {channel_number}. {}",
-                                                error_message
-                                                    .replace("\n", " ") // cannot handle new lines, so turn into spaces
-                                                    .replace("|", " ") // not very meaningful, so turn into spaces
-                                                    .replace("^", " ") // not very meaningful, so turn into spaces
-                                                    .replace_all("  ", " ")
-                                                    .replace_all("  ", " ")
-                                                    .replace_all("  ", " ")
-                                            ));
-                                        }
-
-                                        _ => {
-                                            status_of_rradio.all_4lines.update_if_changed(
-                                                the_channel_error_events.to_lcd_screen().as_str(),
-                                            );
-                                            status_of_rradio.running_status =
-                                                RunningStatus::LongMessageOnAll4Lines;
-                                        }
-                                    }
-                                }
-                            }
-                            if let Err(playbin_error_message) =
-                                playbin.play_track(&mut status_of_rradio, &config, &mut lcd, true)
-                            {
-                                status_of_rradio.all_4lines.update_if_changed(
-                                    format!("When playing a track on channel {} got {playbin_error_message}", status_of_rradio.channel_number)
-                                        .as_str());
-                                status_of_rradio.running_status =
-                                    RunningStatus::LongMessageOnAll4Lines;
-                            } else {
-                                // play worked
-                                let line2 = generate_line2(&status_of_rradio);
-                                status_of_rradio
-                                    .line_2_data
-                                    .update_if_changed(line2.as_str());
-                                write_status_to_web_page(
-                                    line2,
-                                    status_of_rradio.position_and_duration[channel_number]
-                                        .artist
-                                        .clone(),
-                                    &web_data_changed_tx,
-                                );
-                            }
+                            play_channel(
+                                channel_number,
+                                &mut status_of_rradio,
+                                &config,
+                                &mut playbin,
+                                &mut lcd,
+                                &web_data_changed_tx,
+                            );
                         }
                         keyboard::Event::OutputStatusDebug => {
                             println!("\r");
@@ -762,7 +662,7 @@ async fn main() -> Result<(), String> {
                         web::Event::PodcastIndexChanged { podcast_index } => {
                             // the user has changed the podcast they want ie they want "the Archers"
                             if podcast_index >= 0 {
-                                write_status_to_web_page(
+                                html_helpers::write_status_to_web_page(
                                     "Waiting for the data".to_string(),
                                     String::new(),
                                     &web_data_changed_tx,
@@ -787,7 +687,8 @@ async fn main() -> Result<(), String> {
                                                 "<title>",
                                                 "</title>",
                                             );
-                                            let channel_title = decode_html(channel_title_temp);
+                                            let channel_title =
+                                                html_helpers::decode_html(channel_title_temp);
 
                                             let description = extract(
                                                 podcast_string.as_str(),
@@ -866,7 +767,7 @@ async fn main() -> Result<(), String> {
                                     }
                                 }
                             } else {
-                                write_status_to_web_page(
+                                html_helpers::write_status_to_web_page(
                                     "No podcast selected".to_string(),
                                     String::new(),
                                     &web_data_changed_tx,
@@ -914,7 +815,7 @@ async fn main() -> Result<(), String> {
                                                     .podcast_data_for_all_stations
                                                     .clone(),
                                             });
-                                        write_status_to_web_page(
+                                        html_helpers::write_status_to_web_page(
                                             "No Podcast selected".to_string(),
                                             String::new(),
                                             &web_data_changed_tx,
@@ -950,7 +851,7 @@ async fn main() -> Result<(), String> {
                                         if let Some(header) = response.headers().get(CONTENT_TYPE) {
                                             if let Ok(content_type) = header.to_str() {
                                                 if content_type.starts_with("audio/") {
-                                                    write_status_to_web_page(
+                                                    html_helpers::write_status_to_web_page(
                                                         format!("Playing {}", new_podcast_text),
                                                         String::new(),
                                                         &web_data_changed_tx,
@@ -971,7 +872,9 @@ async fn main() -> Result<(), String> {
                                                     if let Ok(podcast_string) =
                                                         response.text().await
                                                         && let Some(channel_title) =
-                                                            is_rss(podcast_string.as_str())
+                                                            html_helpers::is_rss(
+                                                                podcast_string.as_str(),
+                                                            )
                                                     {
                                                         // form the new podcast data
                                                         let new_podcast_data =
@@ -994,13 +897,13 @@ async fn main() -> Result<(), String> {
                                                                 .podcast_data_for_all_stations
                                                                 .clone(),
                                                         });
-                                                        write_status_to_web_page(format!(
+                                                        html_helpers::write_status_to_web_page(format!(
                                                             "Stored RSS data for \"{}\"",
                                                             channel_title
                                                         ), String::new(), &web_data_changed_tx);
                                                     }
                                                     } else {
-                                                        write_status_to_web_page(
+                                                        html_helpers::write_status_to_web_page(
                                                             "Could not get podcast data"
                                                                 .to_string(),
                                                             String::new(),
@@ -1008,7 +911,7 @@ async fn main() -> Result<(), String> {
                                                         );
                                                     }
                                                 } else {
-                                                    write_status_to_web_page(
+                                                    html_helpers::write_status_to_web_page(
                                                         format!(
                                                             "Unknown mime type {}",
                                                             content_type
@@ -1018,18 +921,18 @@ async fn main() -> Result<(), String> {
                                                     )
                                                 }
                                             } else {
-                                                write_status_to_web_page(
+                                                html_helpers::write_status_to_web_page(
                                                 "Ignoring your request as could not get mime header type".to_string(), 
                                                 String::new(), &web_data_changed_tx);
                                             }
                                         } else {
-                                            write_status_to_web_page(
+                                            html_helpers::write_status_to_web_page(
                                             "Ignoring your request as no header information in the data you supplied".to_string(),
                                             String::new(), &web_data_changed_tx);
                                         }
                                     }
                                     Err(_) => {
-                                        write_status_to_web_page(
+                                        html_helpers::write_status_to_web_page(
                                             "Invalid input on web page".to_string(),
                                             String::new(),
                                             &web_data_changed_tx,
@@ -1037,6 +940,14 @@ async fn main() -> Result<(), String> {
                                     }
                                 };
                             } else if let Ok(channel_number) = new_podcast_text.parse::<usize>() {
+                                play_channel(
+                                    channel_number,
+                                    &mut status_of_rradio,
+                                    &config,
+                                    &mut playbin,
+                                    &mut lcd,
+                                    &web_data_changed_tx,
+                                );
                                 my_dbg!(format!("we should play channel{}", channel_number))
                             }
                         } // else do nothing as either the user is in the process of entering a valid channel or the input is obviously wrong
@@ -1236,37 +1147,109 @@ fn change_volume(
     let _ = data_changed_tx.send(web::DataChanged::Volume(status_of_rradio.current_volume));
 }
 
-/// Work out if a podcast string is an RSS feed, & if it is, return the name of the podcast
-/// after de-escaping it
-pub fn is_rss(podcast_string: &str) -> Option<String> {
-    if podcast_string.contains("<rss version") | podcast_string.contains("xmlns:atom") {
-        Some(decode_html(extract(podcast_string, "<title>", "</title>")))
-    } else {
-        None
-    }
-}
-
-/// de-escapes an HTML sequence if the input is valid HTML. If it is invalid, it returns the input string unchanged
-pub fn decode_html(html_string: &str) -> String {
-    extern crate htmlescape;
-    if let Ok(new_value) = htmlescape::decode_html(html_string) {
-        new_value
-    } else {
-        html_string.to_string()
-    }
-}
-
-/// write a status message to the web page after webpage use
-fn write_status_to_web_page(
-    main_message: String,
-    secondary_message: String,
+/// plays the specified channel typically 00 to 99
+fn play_channel(
+    channel_number: usize,
+    mut status_of_rradio: &mut PlayerStatus,
+    config: &read_config::Config,
+    playbin: &mut PlaybinElement,
+    lcd: &mut crate::lcd::Lc,
     web_data_changed_tx: &tokio::sync::broadcast::Sender<DataChanged>,
 ) {
-    let _ = web_data_changed_tx.send(web::DataChanged::EpisodeDataForOnePodcast {
-        episode_data_for_one_podcast: EpisodeDataForOnePodcastDownloaded {
-            channel_title: main_message,
-            description: secondary_message,
-            data_for_multiple_episodes: vec![],
-        },
-    });
+    status_of_rradio.initialise_for_new_station();
+    if channel_number == status_of_rradio.channel_number
+        && status_of_rradio.running_status == RunningStatus::NoChannel
+    {
+        status_of_rradio.running_status = RunningStatus::NoChannelRepeated;
+    } else {
+        status_of_rradio.running_status = RunningStatus::RunningNormally;
+        status_of_rradio.position_and_duration[status_of_rradio.channel_number].position =
+            ClockTime::ZERO;
+        status_of_rradio.line_2_data.update_if_changed("");
+        status_of_rradio.line_34_data.update_if_changed("");
+        status_of_rradio.all_4lines.update_if_changed("");
+        let previous_channel_number = status_of_rradio.channel_number;
+        status_of_rradio.channel_number = channel_number;
+
+        if let Err(the_channel_error_events) = store_channel_details_and_implement_them(
+            config,
+            status_of_rradio,
+            playbin,
+            previous_channel_number,
+            lcd,
+        ) {
+            html_helpers::write_status_to_web_page(
+                format!("{:?}", the_channel_error_events),
+                String::new(),
+                web_data_changed_tx,
+            );
+            match the_channel_error_events {
+                ChannelErrorEvents::CouldNotFindChannelFile => {
+                    status_of_rradio.toml_error = None; // clear the TOML error out, the user must have seen it by now
+                    status_of_rradio.running_status = if previous_channel_number == channel_number {
+                        RunningStatus::NoChannelRepeated
+                    } else {
+                        RunningStatus::NoChannel
+                    };
+                    if let Some(ding_filename) = &config.aural_notifications.filename_error {
+                        // play a ding if one has been specified
+                        status_of_rradio.position_and_duration
+                            [player_status::START_UP_DING_CHANNEL_NUMBER]
+                            .channel_data
+                            .station_urls = vec![format!("file://{ding_filename}")];
+                        let _ignore_error_if_beep_fails =
+                            playbin.play_track(status_of_rradio, config, lcd, false);
+                        status_of_rradio.position_and_duration
+                            [player_status::START_UP_DING_CHANNEL_NUMBER]
+                            .index_to_current_track = 0;
+                    }
+                }
+                ChannelErrorEvents::CouldNotParseChannelFile {
+                    channel_number,
+                    error_message,
+                } => {
+                    status_of_rradio.toml_error = Some(format!(
+                        "Could not parse channel {channel_number}. {}",
+                        error_message
+                            .replace("\n", " ") // cannot handle new lines, so turn into spaces
+                            .replace("|", " ") // not very meaningful, so turn into spaces
+                            .replace("^", " ") // not very meaningful, so turn into spaces
+                            .replace_all("  ", " ")
+                            .replace_all("  ", " ")
+                            .replace_all("  ", " ")
+                    ));
+                }
+
+                _ => {
+                    status_of_rradio
+                        .all_4lines
+                        .update_if_changed(the_channel_error_events.to_lcd_screen().as_str());
+                    status_of_rradio.running_status = RunningStatus::LongMessageOnAll4Lines;
+                }
+            }
+        }
+    }
+    if let Err(playbin_error_message) = playbin.play_track(status_of_rradio, config, lcd, true) {
+        status_of_rradio.all_4lines.update_if_changed(
+            format!(
+                "When playing a track on channel {} got {playbin_error_message}",
+                status_of_rradio.channel_number
+            )
+            .as_str(),
+        );
+        status_of_rradio.running_status = RunningStatus::LongMessageOnAll4Lines;
+    } else {
+        // play worked
+        let line2 = generate_line2(status_of_rradio);
+        status_of_rradio
+            .line_2_data
+            .update_if_changed(line2.as_str());
+        html_helpers::write_status_to_web_page(
+            line2,
+            status_of_rradio.position_and_duration[channel_number]
+                .artist
+                .clone(),
+            web_data_changed_tx,
+        );
+    }
 }

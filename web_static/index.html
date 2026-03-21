@@ -9,34 +9,77 @@
     <script src="htmx.js"></script>
     <script src="htmx-ext-sse.js"></script>
     <script src="index.js"></script>
+
+    
+    <style>
+        .topnav {
+            overflow: hidden;
+            background-color: white;
+            position: relative;
+            font-size: 30px;
+            text-align: center;
+        }
+
+        .topnav a {
+            display: block;
+        }
+
+        .topnav a.icon {
+            position: absolute;
+            right: 0;
+            top: 0;
+        }
+
+        .topnav a.icon:hover {
+            background-color: black;
+            color: white;
+        }
+    </style>
 </head>
 
 <body>
     <div id="app" hx-ext="sse" sse-connect="/api/main-page-events">
         <div class="flex-col fixed-size" style="font-size: 120%;">
-           
-            <h1>New RRadio</h1>
-          
-            <center>
-                <button hx-post="/api/playpause" hx-swap="none">⏯</button>   <!-- playpause-->
+            <div class="topnav">
+                <a href="#home" >New RRadio</a>
+                <div  style="display: none;" id="linksToMenu">
+                    <a href="#contact">Contact</a>
+                    <a href="/debug" target=”_blank” > Debug</a>
+                </div>
+                <a href="javascript:void(0);" class="icon" onclick="toggleMenu()">☰</a>
+            </div>
+
+            <div class="buttondiv">
+                <button hx-post="/api/playpause" hx-swap="none">⏯</button> <!-- playpause-->
                 <!-- When you click the volume down button, send a POST request to "volume-down" and ignore the response -->
-                <button  hx-post="/api/volume-down" hx-swap="none">🔉</button>
+                <button hx-post="/api/volume-down" hx-swap="none">🔉</button>
                 <span sse-swap="volume-changed">INIT VOLUME</span>
 
                 <!-- When you click the volume up button, send a POST request to "volume-up" and ignore the response -->
                 <button hx-post="/api/volume-up" hx-swap="none">🔊</button>
-
-                <div sse-swap="position-changed" ></div>
-                <input type="text" name="new_podcast_text" hx-post="/api/podcast-text" hx-trigger="input" style='width:100%'
-                    value = "Pasting a URL in this box will play the URL or load an RSS">
+                <div sse-swap="position-changed"></div>
+                <input type="text" name="new_podcast_text" hx-post="/api/podcast-text" hx-trigger="input"
+                    style='width:100%' class="buttondiv"
+                    value="Pasting a URL in this box will play the URL or load an RSS">
 
                 <span sse-swap="podcast-changed-by-user">INIT PODCAST</span>
-            </center>
+            </div>
 
         </div>
-        <div class="flex-col grow-and-shrink" style="overflow-y: scroll;" sse-swap="list-of-episodes">List of episodes will be here when chosen          
+        <div class="flex-col grow-and-shrink" style="overflow-y: scroll;" sse-swap="list-of-episodes">List of episodes
+            will be here when chosen
         </div>
     </div>
+    <script>
+        function toggleMenu() {
+            var x = document.getElementById("linksToMenu");
+            if (x.style.display === "block") {
+                x.style.display = "none";
+            } else {
+                x.style.display = "block";
+            }
+        }</script>
+
 </body>
 
 </html>

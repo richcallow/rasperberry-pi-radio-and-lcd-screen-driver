@@ -249,12 +249,17 @@ fn render_events_data_changed(
                 .event("list-of-episodes")
                 .data(
                     maud::html!{ 
-                        center{
+                        div class="buttondiv" {
                             h2{ "podcast" (episode_data_for_one_podcast.channel_title) }
-                            div { ( format!("qqq{}    .", episode_data_for_one_podcast.description)) 
+                            div { 
+                            span class= "rightmargin"{ 
+                                ( format!("qqq{}", episode_data_for_one_podcast.description)) 
+                            }
                             button hx-post="/api/delete-podcast" hx-swap="none"  background-color=  (25) {
                                 ( format!("Delete {} podcast", episode_data_for_one_podcast.channel_title))}
                             }
+                            
+                            
                             p { @for count in 0.. episode_data_for_one_podcast.data_for_multiple_episodes.len() {                       
                                 p {(episode_data_for_one_podcast.data_for_multiple_episodes[count].date) ("  ")
                                     (episode_data_for_one_podcast.data_for_multiple_episodes[count].subtitle)}
@@ -469,7 +474,7 @@ pub fn start_server() -> (
         let app = memory_serve::MemoryServe::new(memory_serve::load_assets!("web_static"))
             .into_router()
             .nest("/api", api_router) // strip "/api" from the start of the path and forward to "api_router"
-            .route("/1", get(handle_rradio_status_report))
+            .route("/debug", get(handle_rradio_status_report))
             .with_state(ServerState {
                 events_tx: EventsTx { events_tx },
                 data_changed_rx: DataChangedReceiver { data_changed_rx },
