@@ -3,6 +3,9 @@ use std::fs;
 use super::PodcastDataAllStations;
 use chrono::Utc;
 use gstreamer::ClockTime;
+use substring::Substring;
+
+use super::ChannelErrorEvents;
 
 use crate::{
     get_channel_details::{self, ChannelFileDataDecoded},
@@ -107,7 +110,7 @@ impl PlayerStatus {
         }
     }
     /// Initialises for a new station, sets time_started_playing_current_station, RunningStatus::RunningNormally,
-    /// number_of_pings_to_this_channel = 0
+    /// sets number_of_pings_to_this_channel = 0
     pub fn initialise_for_new_station(&mut self) {
         self.time_started_playing_current_station = chrono::Utc::now();
         self.running_status = RunningStatus::RunningNormally;
@@ -142,6 +145,53 @@ impl PlayerStatus {
         println!("usb\t\t\t\t{:?}\r", config.usb);
         println!("samba\t\t\t\t{:?}\r", config.samba);
         println!("volume_offset\t\t\t{}\r", config.volume_offset);
+        println!("short_advance_time\t\t{}\r", config.short_advance_time);
+        println!("long_advance_time\t\t{}\r", config.long_advance_time);
+    }
+
+    pub fn generate_list_of_valid_channels(
+        &self,
+        config: &Config,
+    ) -> Result<String, std::fmt::Error> {
+        use std::fmt::Write;
+        let mut report = String::new();
+        writeln!(report, "\nList of valid channels")?;
+
+        let file_names_in_playlist_folder =
+            std::fs::read_dir(&config.stations_directory).map_err(|_read_error| std::fmt::Error)?;
+
+        for file_name_in_playlist_folder in file_names_in_playlist_folder.flatten() {
+            // As OK, enumerate all the files in the folder
+
+            // we have a filename, but does it start with 2 digits
+            let filename = file_name_in_playlist_folder
+                .file_name()
+                .to_string_lossy()
+                .to_string();
+
+            if filename.len() > 1 && str::parse::<i8>(filename.substring(0, 2)).is_ok() {
+                // now we know that file name starts with 2 digits, ie is a valid channel
+                let channel_file_info =
+                    std::fs::read_to_string(file_name_in_playlist_folder.path())
+                        .map_err(|_| std::fmt::Error)?;
+
+                let toml_result: Result<
+                    get_channel_details::ChannelFileDataFromTOML,
+                    toml::de::Error,
+                > = toml::from_str(channel_file_info.trim_ascii_end());
+
+                match toml_result {
+                    Ok(toml_data) => {
+                        writeln!(report, "{} \t{}", file_name_in_playlist_folder.file_name().to_string_lossy(), toml_data.organisation)?;
+                    }
+                    Err(toml_error) => {
+                        writeln!(report, "{} \t{:?}",file_name_in_playlist_folder.file_name().to_string_lossy(), toml_error)?;
+                    }
+                }
+            }
+        }
+
+        Ok(report)
     }
 
     /// reports whether or not the amplifier is muted & the status information
@@ -325,6 +375,7 @@ impl PlayerStatus {
                 Ok(network_data) => {
                     self.network_data = network_data;
                     self.running_status = crate::RunningStatus::Startingup;
+                    self.all_4lines.update_if_changed("");
                     return;
                 }
                 Err(error) => self

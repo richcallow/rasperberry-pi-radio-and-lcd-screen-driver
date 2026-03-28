@@ -62,6 +62,26 @@ pub struct Config {
 
     ///details of a memory stick on a Samba share
     pub samba: Option<MediaDetails>,
+
+    /// the time that the positon will advance (or goback) when the short advance
+    /// (or short goback) button is pressed on the web page
+    #[serde(skip, default = "short_advance_time_default")]
+    pub short_advance_time: i32,
+
+    /// the time that the positon will advance (or goback) when the long advance
+    /// (or long goback) button is pressed on the web page
+    #[serde(skip, default = "long_advance_time_default")]
+    pub long_advance_time: i32,
+}
+
+/// the default value for short_advance_time
+fn short_advance_time_default() -> i32 {
+    10
+}
+
+/// the default value for long_advance_time
+fn long_advance_time_default() -> i32 {
+    60
 }
 
 #[derive(Debug, Default, PartialEq, Clone, serde::Deserialize)]
@@ -98,7 +118,7 @@ pub struct MediaDetails {
     // the deserializer will skip what they have entered and it will be false.
     pub is_mounted: bool, // the user should not specify this & it must be false on startup
 }
-/// the default value for is_mounted;
+/// the default value for is_mounted
 fn is_mounted_default() -> bool {
     false
 }
@@ -150,6 +170,8 @@ impl Default for Config {
             usb: None,
             samba: None,
             max_number_of_remote_pings: 15,
+            short_advance_time: 10,
+            long_advance_time: 60,
         }
     }
 }
@@ -229,7 +251,6 @@ impl Config {
         return_value_as_result
     }
 }
-
 
 /// inserts the USB details in the USB part of status_of_rradio
 pub fn insert_usb(config: &Config, status_of_rraadio: &mut PlayerStatus) {

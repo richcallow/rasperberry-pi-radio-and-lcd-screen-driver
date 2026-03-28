@@ -11,7 +11,7 @@ use std::{
 };
 
 use crate::{
-    get_channel_details::{self, SourceType}, ping::PingTimeAndDestination, player_status
+    get_channel_details::{self, SourceType},  ping::PingTimeAndDestination, player_status
 };
 use anyhow::Context;
 use substring::Substring;
@@ -22,6 +22,7 @@ pub mod get_mute_state;
 mod get_temperature;
 pub mod get_throttled;
 mod get_wifi_strength;
+
 
 #[derive(PartialEq, Debug)]
 /// List of the 4 line numbers on the LCD drive
@@ -96,7 +97,8 @@ impl std::fmt::Debug for LcdScreenEncodedText {
 /// Holds the text, and information on how to display it, namely the scroll position,
 /// the number of lines & the time the text was last scrolled.
 pub struct ScrollData {
-    pub text: LcdScreenEncodedText,
+    pub lcd_encoded_text: LcdScreenEncodedText,
+    pub text: String,
     pub scroll_position: usize,
     pub num_lines: usize,
     pub last_update_time: Instant,
@@ -132,7 +134,8 @@ impl ScrollData {
         }
 
         Self {
-            text: LcdScreenEncodedText { bytes: text_bytes },
+            lcd_encoded_text: LcdScreenEncodedText { bytes: text_bytes },
+            text: text.to_string(),
             scroll_position: 0,
             num_lines,
             last_update_time: Instant::now(),
@@ -146,7 +149,7 @@ impl ScrollData {
         config: &crate::read_config::Config, // the data read from rradio's config.toml
         number_of_available_characters: usize, // in some cases some characters at the end of the line are reserved for other strings
     ) {
-        if (self.text.bytes.len() <= number_of_available_characters)
+        if (self.lcd_encoded_text.bytes.len() <= number_of_available_characters)
             || (self.last_update_time.elapsed()
                 < tokio::time::Duration::from_millis(config.scroll.scroll_period_ms))
         {
@@ -154,7 +157,7 @@ impl ScrollData {
         }
         // We need to scroll
         let increment = self
-            .text
+            .lcd_encoded_text
             .bytes
             .iter() // Iterate over the octets in the text
             .enumerate() // We want to know how far we've advanced
@@ -165,7 +168,7 @@ impl ScrollData {
             .unwrap_or(config.scroll.min_scroll); // If we can't find a space, move 6 characters
 
         self.scroll_position += increment;
-        match self.text.bytes.get(self.scroll_position..) {
+        match self.lcd_encoded_text.bytes.get(self.scroll_position..) {
             None => {
                 self.scroll_position = 0; // We've scrolled past the end of the text
             }
@@ -183,7 +186,7 @@ impl ScrollData {
     pub fn update_if_changed(&mut self, new_text: &str) {
         let new_scroll_data = Self::new(new_text, self.num_lines); // remember that new initialises the scrolling state.
 
-        if self.text.bytes != new_scroll_data.text.bytes {
+        if self.lcd_encoded_text.bytes != new_scroll_data.lcd_encoded_text.bytes {
             *self = new_scroll_data;
         }
     }
@@ -192,7 +195,7 @@ impl ScrollData {
     /// `impl Iterator<Item = u8> + '_` means it returns some anonymous type which
     /// implements Iterator with an Item of u8 and a lifetime of the same lifetime as `self`
     pub fn bytes(&self) -> impl Iterator<Item = u8> + '_ {
-        self.text.bytes.iter().copied().skip(self.scroll_position)
+        self.lcd_encoded_text.bytes.iter().copied().skip(self.scroll_position)
     }
 }
 
@@ -461,6 +464,8 @@ impl Lc {
                 }
             }
         }
+
+         //qqqq
     }
 
     /// Fills the text buffer with the start up text before any channel has been selected
@@ -613,7 +618,7 @@ impl Lc {
             == get_channel_details::SourceType::UrlList
         {
             // output the buffer state as we are playing a stream
-            if status_of_rradio.line_34_data.text.bytes.len() <= NUM_CHARACTERS_PER_LINE {
+            if status_of_rradio.line_34_data.lcd_encoded_text.bytes.len() <= NUM_CHARACTERS_PER_LINE {
                 let trimmed_buffer: u8 = (status_of_rradio.buffering_percent)
                     .clamp(0, 99)
                     .try_into()
@@ -628,7 +633,7 @@ impl Lc {
                     .write_text_to_single_line("                    ".bytes(), LineNum::Line4);
                 text_buffer.write_character_to_single_position(LineNum::Line4, column, character);
 
-                if status_of_rradio.line_34_data.text.bytes.is_empty() {
+                if status_of_rradio.line_34_data.lcd_encoded_text.bytes.is_empty() {
                     text_buffer.write_text_to_single_line(
                         Lc::get_current_date_and_time_text().bytes(),
                         LineNum::Line3,
@@ -648,7 +653,7 @@ impl Lc {
             };
         }
         // it is pointless to output the buffer state for CD drives & USB sticks as it is always 100% or 0%
-        else if status_of_rradio.line_34_data.text.bytes.len() <= NUM_CHARACTERS_PER_LINE {
+        else if status_of_rradio.line_34_data.lcd_encoded_text.bytes.len() <= NUM_CHARACTERS_PER_LINE {
             text_buffer.write_text_to_single_line(
                 Lc::get_current_date_and_time_text().bytes(),
                 LineNum::Line4,

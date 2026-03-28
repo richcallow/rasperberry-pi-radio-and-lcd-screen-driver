@@ -11,6 +11,7 @@ use get_channel_details::{ChannelErrorEvents, SourceType};
 use gstreamer::ClockTime;
 use gstreamer::{SeekFlags, prelude::ElementExtManual};
 use gstreamer_interfaces::PlaybinElement;
+use libc::CLD_CONTINUED;
 
 mod cd_functions;
 mod extract_html;
@@ -23,18 +24,22 @@ mod keyboard;
 mod lcd;
 mod mount_media;
 mod ping;
+mod play_channel;
 mod play_urls;
 mod player_status;
+mod previous_or_nextrack;
 mod read_config;
 mod unmount;
 mod web;
 
 use crate::extract_html::extract;
 use crate::get_channel_details::{ChannelFileDataDecoded, get_ip_address};
+
+use crate::html_helpers::write_status_to_web_page;
 use crate::lcd::get_mute_state::get_mute_state;
 use crate::player_status::{PODCAST_CHANNEL_NUMBER, RealTimeDataOnOneChannel};
 use crate::unmount::unmount_all;
-use crate::web::DataChanged;
+use crate::web::{DataChanged, SeekTimes};
 use get_channel_details::store_channel_details_and_implement_them;
 use lcd::get_local_ip_address;
 use lcd::{RunningStatus, ScrollData};
@@ -42,7 +47,6 @@ use ping::{get_ping_time, see_if_there_is_a_ping_response};
 use player_status::NUMBER_OF_POSSIBLE_CHANNELS;
 use player_status::PlayerStatus;
 use serde::{Deserialize, Serialize};
-use string_replace_all::StringReplaceAll;
 use unmount::unmount_if_needed;
 
 #[macro_export]
@@ -314,10 +318,10 @@ async fn main() -> Result<(), String> {
                 match event {
                     None => {
                         unmount_all(&mut status_of_rradio);
-
                         status_of_rradio.running_status = lcd::RunningStatus::ShuttingDown;
                         lcd.clear();
                         lcd.write_rradio_status_to_lcd(&status_of_rradio, &config);
+
                         break; // if we get here, the program will terminate
                     } //One of the streams has closed, signalling a shutdown of the program, so break out of the main loop
                     Some(Event::Keyboard(keyboard_event)) => match keyboard_event {
@@ -372,66 +376,23 @@ async fn main() -> Result<(), String> {
                             );
                         }
                         keyboard::Event::PreviousTrack => {
-                            status_of_rradio.initialise_for_new_station();
-                            if status_of_rradio.position_and_duration
-                                [status_of_rradio.channel_number]
-                                .position
-                                > config.goto_previous_track_time_delta
-                            {
-                                // We have been playing for some time, so seek the start of the track
-                                let _ = playbin.playbin_element.seek_simple(
-                                    SeekFlags::FLUSH
-                                        | SeekFlags::KEY_UNIT
-                                        | SeekFlags::SNAP_NEAREST,
-                                    gstreamer::ClockTime::ZERO,
-                                );
-                            } else {
-                                // we have only just started, so user wants the previous track
-                                status_of_rradio.position_and_duration
-                                    [status_of_rradio.channel_number]
-                                    .index_to_current_track = (status_of_rradio
-                                    .position_and_duration[status_of_rradio.channel_number]
-                                    .index_to_current_track
-                                    + status_of_rradio.position_and_duration
-                                        [status_of_rradio.channel_number]
-                                        .channel_data
-                                        .station_urls
-                                        .len()
-                                    - 1)
-                                    % status_of_rradio.position_and_duration
-                                        [status_of_rradio.channel_number]
-                                        .channel_data
-                                        .station_urls
-                                        .len(); // % is a remainder operator not modulo
-                                if let Err(playbin_error_message) = playbin.play_track(
-                                    &mut status_of_rradio,
-                                    &config,
-                                    &mut lcd,
-                                    false,
-                                ) {
-                                    status_of_rradio.all_4lines.update_if_changed(
-                                    format!("When wanting to play the previous track got {playbin_error_message}")
-                                        .as_str(),
-                                );
-                                    status_of_rradio.running_status =
-                                        RunningStatus::LongMessageOnAll4Lines;
-                                } else {
-                                    status_of_rradio.line_2_data.update_if_changed(
-                                        status_of_rradio.position_and_duration
-                                            [status_of_rradio.channel_number]
-                                            .channel_data
-                                            .organisation
-                                            .as_str(),
-                                    );
-                                }
-                            }
+                            previous_or_nextrack::previous_track(
+                                &mut status_of_rradio,
+                                &playbin,
+                                &config,
+                                &mut lcd,
+                            );
                         }
                         keyboard::Event::NextTrack => {
-                            status_of_rradio.ping_data.number_of_pings_to_this_channel = 0;
-                            next_track(&mut status_of_rradio, &playbin, &config, &mut lcd);
+                            previous_or_nextrack::next_track(
+                                &mut status_of_rradio,
+                                &playbin,
+                                &config,
+                                &mut lcd,
+                            );
                         }
                         keyboard::Event::PlayStation { channel_number } => {
-                            play_channel(
+                            play_channel::play_channel(
                                 channel_number,
                                 &mut status_of_rradio,
                                 &config,
@@ -476,13 +437,24 @@ async fn main() -> Result<(), String> {
                                                 status_of_rradio
                                                     .line_34_data
                                                     .update_if_changed(title);
+
+                                                write_status_to_web_page(
+                                                    &status_of_rradio,
+                                                    &web_data_changed_tx,
+                                                );
                                             }
                                         }
                                         "organization" => {
                                             if let Ok(mut organization) = tag_value.get::<&str>() {
-                                                if organization == "LaPremiere" {
-                                                    organization = "La Première"
+                                                match organization {
                                                     // correct the name of the station
+                                                    "LaPremiere" => organization = "La Première",
+
+                                                    "Nostalgie Chansons fran??aises" => {
+                                                        organization =
+                                                            "Nostalgie Chansons françaises"
+                                                    }
+                                                    _ => {}
                                                 }
 
                                                 if status_of_rradio.position_and_duration
@@ -491,6 +463,8 @@ async fn main() -> Result<(), String> {
                                                     .organisation
                                                     != organization
                                                 {
+                                                    my_dbg!(organization);
+
                                                     status_of_rradio.position_and_duration
                                                         [status_of_rradio.channel_number]
                                                         .channel_data
@@ -518,17 +492,20 @@ async fn main() -> Result<(), String> {
                                                 if status_of_rradio.channel_number
                                                     == PODCAST_CHANNEL_NUMBER
                                                 {
-                                                    let line2 = generate_line2(&status_of_rradio);
+                                                    let line2 =
+                                                        previous_or_nextrack::generate_line2(
+                                                            &status_of_rradio,
+                                                        );
                                                     status_of_rradio
                                                         .line_2_data
-                                                        .update_if_changed(line2.as_str())
+                                                        .update_if_changed(line2.as_str());
                                                 }
                                             }
                                         }
                                         _ => {}
                                     }
                                 }
-                                let line2 = generate_line2(&status_of_rradio);
+                                let line2 = previous_or_nextrack::generate_line2(&status_of_rradio);
                                 status_of_rradio
                                     .line_2_data
                                     .update_if_changed(line2.as_str());
@@ -558,7 +535,12 @@ async fn main() -> Result<(), String> {
                                     .len()
                                     > 1
                                 {
-                                    next_track(&mut status_of_rradio, &playbin, &config, &mut lcd);
+                                    previous_or_nextrack::next_track(
+                                        &mut status_of_rradio,
+                                        &playbin,
+                                        &config,
+                                        &mut lcd,
+                                    );
                                 }
                             }
 
@@ -582,6 +564,48 @@ async fn main() -> Result<(), String> {
                         }
                     }
                     Some(Event::Web(web_event)) => match web_event {
+                        web::Event::NextStation => previous_or_nextrack::next_track(
+                            &mut status_of_rradio,
+                            &playbin,
+                            &config,
+                            &mut lcd,
+                        ),
+                        web::Event::PreviousStation => {
+                            previous_or_nextrack::previous_track(
+                                &mut status_of_rradio,
+                                &playbin,
+                                &config,
+                                &mut lcd,
+                            );
+                        }
+                        web::Event::AdvancePosition { advance_position } => {
+                            if let Some(duration) = status_of_rradio.position_and_duration
+                                [status_of_rradio.channel_number]
+                                .duration
+                            {
+                                let mut new_position = ClockTime::from_nseconds(
+                                    status_of_rradio.position_and_duration
+                                        [status_of_rradio.channel_number]
+                                        .position
+                                        .saturating_add_signed((advance_position) * 1_000_000_000),
+                                );
+
+                                if new_position > duration {
+                                    // must not seek beyond the end of the track
+                                    new_position = duration
+                                }
+
+                                let _ = playbin.playbin_element.seek_simple(
+                                    SeekFlags::FLUSH
+                                        | SeekFlags::KEY_UNIT
+                                        | SeekFlags::SNAP_NEAREST,
+                                    new_position,
+                                );
+                            } else {
+                                eprintln!("Error: cannot seek on non-seekable media")
+                            }
+                        }
+
                         web::Event::EpisodeSelected { episode_index } => {
                             let url = episode_data_for_one_podcast_downloaded
                                 .data_for_multiple_episodes[episode_index]
@@ -624,7 +648,7 @@ async fn main() -> Result<(), String> {
                             } else {
                                 // play worked
 
-                                let line2 = generate_line2(&status_of_rradio);
+                                let line2 = previous_or_nextrack::generate_line2(&status_of_rradio);
                                 status_of_rradio
                                     .line_2_data
                                     .update_if_changed(line2.as_str())
@@ -635,7 +659,6 @@ async fn main() -> Result<(), String> {
                             web_page_startup_data_tx,
                         } => {
                             let _ = web_page_startup_data_tx.send(web::WebPageStartupData {
-                                // initialise the volume on the web page
                                 volume: status_of_rradio.current_volume,
                                 // set up the dropdown box that allows the user to choose the podcast station
                                 podcast_data_for_all_stations: status_of_rradio
@@ -643,6 +666,11 @@ async fn main() -> Result<(), String> {
                                     .podcast_data_for_all_stations
                                     .clone(),
                             });
+                            write_status_to_web_page(&status_of_rradio, &web_data_changed_tx);
+                            let _ =
+                                web_data_changed_tx.send(web::DataChanged::CanSeekBackwards(None));
+                            let _ =
+                                web_data_changed_tx.send(web::DataChanged::CanSeekForwards(None));
                         }
                         web::Event::PlayPause => {
                             // user on a web client has hit the play/pause button
@@ -662,7 +690,7 @@ async fn main() -> Result<(), String> {
                         web::Event::PodcastIndexChanged { podcast_index } => {
                             // the user has changed the podcast they want ie they want "the Archers"
                             if podcast_index >= 0 {
-                                html_helpers::write_status_to_web_page(
+                                html_helpers::write_message_to_web_page(
                                     "Waiting for the data".to_string(),
                                     String::new(),
                                     &web_data_changed_tx,
@@ -767,7 +795,7 @@ async fn main() -> Result<(), String> {
                                     }
                                 }
                             } else {
-                                html_helpers::write_status_to_web_page(
+                                html_helpers::write_message_to_web_page(
                                     "No podcast selected".to_string(),
                                     String::new(),
                                     &web_data_changed_tx,
@@ -782,6 +810,15 @@ async fn main() -> Result<(), String> {
                                 eprintln!("Failed to send RRadio Status Report to web worker\r");
                             }
                         }
+                        web::Event::RequestRRadioPlaylist { report_tx } => {
+                            if report_tx
+                                .send(status_of_rradio.generate_list_of_valid_channels(&config))
+                                .is_err()
+                            {
+                                eprintln!("Failed to send RRadio playlist to web worker\r");
+                            }
+                        }
+
                         web::Event::VolumeDownPressed => change_volume(
                             -1,
                             &config,
@@ -815,7 +852,7 @@ async fn main() -> Result<(), String> {
                                                     .podcast_data_for_all_stations
                                                     .clone(),
                                             });
-                                        html_helpers::write_status_to_web_page(
+                                        html_helpers::write_message_to_web_page(
                                             "No Podcast selected".to_string(),
                                             String::new(),
                                             &web_data_changed_tx,
@@ -843,23 +880,23 @@ async fn main() -> Result<(), String> {
                             );
                         }
 
-                        web::Event::PodcastText { new_podcast_text } => {
-                            if new_podcast_text.len() > 2 {
+                        web::Event::NewTextFromUser { new_text_from_user } => {
+                            if new_text_from_user.len() > 2 {
                                 use reqwest::header::CONTENT_TYPE;
-                                match reqwest::get(new_podcast_text.trim()).await {
+                                match reqwest::get(new_text_from_user.trim()).await {
                                     Ok(response) => {
                                         if let Some(header) = response.headers().get(CONTENT_TYPE) {
                                             if let Ok(content_type) = header.to_str() {
                                                 if content_type.starts_with("audio/") {
-                                                    html_helpers::write_status_to_web_page(
-                                                        format!("Playing {}", new_podcast_text),
+                                                    html_helpers::write_message_to_web_page(
+                                                        format!("Playing {}", new_text_from_user),
                                                         String::new(),
                                                         &web_data_changed_tx,
                                                     );
 
                                                     play_urls::play_url(
                                                         // we have got a URL that should be played
-                                                        new_podcast_text.trim().into(),
+                                                        new_text_from_user.trim().into(),
                                                         &mut status_of_rradio,
                                                         &mut playbin,
                                                         &config,
@@ -880,7 +917,7 @@ async fn main() -> Result<(), String> {
                                                         let new_podcast_data =
                                                             PodcastDataFromToml {
                                                                 title: channel_title.clone(),
-                                                                url: new_podcast_text,
+                                                                url: new_text_from_user,
                                                             };
                                                         status_of_rradio
                                                             .podcast_data_from_toml
@@ -897,13 +934,13 @@ async fn main() -> Result<(), String> {
                                                                 .podcast_data_for_all_stations
                                                                 .clone(),
                                                         });
-                                                        html_helpers::write_status_to_web_page(format!(
+                                                        html_helpers::write_message_to_web_page(format!(
                                                             "Stored RSS data for \"{}\"",
                                                             channel_title
                                                         ), String::new(), &web_data_changed_tx);
                                                     }
                                                     } else {
-                                                        html_helpers::write_status_to_web_page(
+                                                        html_helpers::write_message_to_web_page(
                                                             "Could not get podcast data"
                                                                 .to_string(),
                                                             String::new(),
@@ -911,7 +948,7 @@ async fn main() -> Result<(), String> {
                                                         );
                                                     }
                                                 } else {
-                                                    html_helpers::write_status_to_web_page(
+                                                    html_helpers::write_message_to_web_page(
                                                         format!(
                                                             "Unknown mime type {}",
                                                             content_type
@@ -921,26 +958,29 @@ async fn main() -> Result<(), String> {
                                                     )
                                                 }
                                             } else {
-                                                html_helpers::write_status_to_web_page(
+                                                html_helpers::write_message_to_web_page(
                                                 "Ignoring your request as could not get mime header type".to_string(), 
                                                 String::new(), &web_data_changed_tx);
                                             }
                                         } else {
-                                            html_helpers::write_status_to_web_page(
+                                            html_helpers::write_message_to_web_page(
                                             "Ignoring your request as no header information in the data you supplied".to_string(),
                                             String::new(), &web_data_changed_tx);
                                         }
                                     }
                                     Err(_) => {
-                                        html_helpers::write_status_to_web_page(
+                                        html_helpers::write_message_to_web_page(
                                             "Invalid input on web page".to_string(),
                                             String::new(),
                                             &web_data_changed_tx,
                                         );
                                     }
                                 };
-                            } else if let Ok(channel_number) = new_podcast_text.parse::<usize>() {
-                                play_channel(
+                            } else if let Ok(channel_number) = new_text_from_user.parse::<usize>()
+                                && new_text_from_user.len() == 2
+                            // it is numeric & 2 digits long (channels are two digits)
+                            {
+                                play_channel::play_channel(
                                     channel_number,
                                     &mut status_of_rradio,
                                     &config,
@@ -948,7 +988,6 @@ async fn main() -> Result<(), String> {
                                     &mut lcd,
                                     &web_data_changed_tx,
                                 );
-                                my_dbg!(format!("we should play channel{}", channel_number))
                             }
                         } // else do nothing as either the user is in the process of entering a valid channel or the input is obviously wrong
                     },
@@ -969,9 +1008,19 @@ async fn main() -> Result<(), String> {
                                 [status_of_rradio.channel_number]
                                 .duration = duration;
 
-                            let _ = web_data_changed_tx
-                                .send(web::DataChanged::Position { position, duration });
-                        } // else if there is no position we cannot do anything useful
+                            match status_of_rradio.position_and_duration
+                                [status_of_rradio.channel_number]
+                                .channel_data
+                                .source_type
+                            {
+                                SourceType::Cd | SourceType::Usb => {
+                                    let _ = web_data_changed_tx
+                                        .send(web::DataChanged::Position { position, duration });
+                                }
+                                SourceType::UnknownSource | SourceType::UrlList => { // do not send position to the web page as it is meaningless for these source types  
+                                }
+                            }
+                        }
                     }
                 }
                 status_of_rradio
@@ -1024,104 +1073,6 @@ async fn main() -> Result<(), String> {
     //or an error, as nothing has failed, we give the "all worked OK termination" value
 }
 
-/// Generates the text for line 2 for the nornmal running case, ie streaming, USB or CD. Adds the throttled state if the Pi is throttled
-pub fn generate_line2(status_of_rradio: &PlayerStatus) -> String {
-    let mut line2 = match status_of_rradio.position_and_duration[status_of_rradio.channel_number]
-        .channel_data
-        .source_type
-    {
-        SourceType::Cd => {
-            let mut num_tracks = status_of_rradio.position_and_duration
-                [status_of_rradio.channel_number]
-                .channel_data
-                .station_urls
-                .len();
-            if status_of_rradio.position_and_duration[status_of_rradio.channel_number]
-                .channel_data
-                .last_track_is_a_ding
-            {
-                num_tracks -= 1
-            }
-            format!(
-                "CD track {} of {}",
-                status_of_rradio.position_and_duration[status_of_rradio.channel_number]
-                    .index_to_current_track
-                    + 1, // +1 as humans start counting at 1, not zero
-                num_tracks
-            )
-        }
-        SourceType::Usb => {
-            let mut num_tracks = status_of_rradio.position_and_duration
-                [status_of_rradio.channel_number]
-                .channel_data
-                .station_urls
-                .len();
-            if status_of_rradio.position_and_duration[status_of_rradio.channel_number]
-                .channel_data
-                .last_track_is_a_ding
-            {
-                num_tracks -= 1
-            }
-
-            format!(
-                "{} ({} of {})",
-                status_of_rradio.position_and_duration[status_of_rradio.channel_number]
-                    .channel_data
-                    .organisation,
-                status_of_rradio.position_and_duration[status_of_rradio.channel_number]
-                    .index_to_current_track
-                    + 1, // +1 as humans start counting at 1, not zero
-                num_tracks
-            )
-        }
-        SourceType::UrlList => status_of_rradio.position_and_duration
-            [status_of_rradio.channel_number]
-            .channel_data
-            .organisation
-            .to_string(),
-        SourceType::UnknownSource => "Unknown source type".to_string(),
-    };
-    let throttled_status = lcd::get_throttled::is_throttled();
-    if throttled_status.pi_is_throttled {
-        line2 = format!("{line2} {}", throttled_status.result)
-    };
-
-    format!("{} {}", line2, get_mute_state())
-}
-
-/// Plays the next track by modulo incrementing status_of_rradio.index_to_current_track
-fn next_track(
-    status_of_rradio: &mut PlayerStatus,
-    playbin: &PlaybinElement,
-    config: &crate::read_config::Config,
-    lcd: &mut crate::lcd::Lc,
-) {
-    status_of_rradio.running_status = RunningStatus::RunningNormally; // at least hope that this is true
-    status_of_rradio.position_and_duration[status_of_rradio.channel_number]
-        .index_to_current_track = (status_of_rradio.position_and_duration
-        [status_of_rradio.channel_number]
-        .index_to_current_track
-        + 1)
-        % status_of_rradio.position_and_duration[status_of_rradio.channel_number]
-            .channel_data
-            .station_urls
-            .len();
-    if let Err(playbin_error_message) = playbin.play_track(status_of_rradio, config, lcd, false) {
-        status_of_rradio.all_4lines.update_if_changed(
-            format!(
-                "When wanting to play the next track playing a track got {playbin_error_message}"
-            )
-            .as_str(),
-        );
-        status_of_rradio.running_status = RunningStatus::LongMessageOnAll4Lines;
-    } else {
-        let line2 = generate_line2(status_of_rradio);
-        status_of_rradio
-            .line_2_data
-            .update_if_changed(line2.as_str());
-    }
-}
-
 /// Changes the volume by config.volume_offset dB up or down as controlled by "direction".
 /// Checks are made that the volume remains in bounds.
 fn change_volume(
@@ -1145,111 +1096,4 @@ fn change_volume(
     }
 
     let _ = data_changed_tx.send(web::DataChanged::Volume(status_of_rradio.current_volume));
-}
-
-/// plays the specified channel typically 00 to 99
-fn play_channel(
-    channel_number: usize,
-    mut status_of_rradio: &mut PlayerStatus,
-    config: &read_config::Config,
-    playbin: &mut PlaybinElement,
-    lcd: &mut crate::lcd::Lc,
-    web_data_changed_tx: &tokio::sync::broadcast::Sender<DataChanged>,
-) {
-    status_of_rradio.initialise_for_new_station();
-    if channel_number == status_of_rradio.channel_number
-        && status_of_rradio.running_status == RunningStatus::NoChannel
-    {
-        status_of_rradio.running_status = RunningStatus::NoChannelRepeated;
-    } else {
-        status_of_rradio.running_status = RunningStatus::RunningNormally;
-        status_of_rradio.position_and_duration[status_of_rradio.channel_number].position =
-            ClockTime::ZERO;
-        status_of_rradio.line_2_data.update_if_changed("");
-        status_of_rradio.line_34_data.update_if_changed("");
-        status_of_rradio.all_4lines.update_if_changed("");
-        let previous_channel_number = status_of_rradio.channel_number;
-        status_of_rradio.channel_number = channel_number;
-
-        if let Err(the_channel_error_events) = store_channel_details_and_implement_them(
-            config,
-            status_of_rradio,
-            playbin,
-            previous_channel_number,
-            lcd,
-        ) {
-            html_helpers::write_status_to_web_page(
-                format!("{:?}", the_channel_error_events),
-                String::new(),
-                web_data_changed_tx,
-            );
-            match the_channel_error_events {
-                ChannelErrorEvents::CouldNotFindChannelFile => {
-                    status_of_rradio.toml_error = None; // clear the TOML error out, the user must have seen it by now
-                    status_of_rradio.running_status = if previous_channel_number == channel_number {
-                        RunningStatus::NoChannelRepeated
-                    } else {
-                        RunningStatus::NoChannel
-                    };
-                    if let Some(ding_filename) = &config.aural_notifications.filename_error {
-                        // play a ding if one has been specified
-                        status_of_rradio.position_and_duration
-                            [player_status::START_UP_DING_CHANNEL_NUMBER]
-                            .channel_data
-                            .station_urls = vec![format!("file://{ding_filename}")];
-                        let _ignore_error_if_beep_fails =
-                            playbin.play_track(status_of_rradio, config, lcd, false);
-                        status_of_rradio.position_and_duration
-                            [player_status::START_UP_DING_CHANNEL_NUMBER]
-                            .index_to_current_track = 0;
-                    }
-                }
-                ChannelErrorEvents::CouldNotParseChannelFile {
-                    channel_number,
-                    error_message,
-                } => {
-                    status_of_rradio.toml_error = Some(format!(
-                        "Could not parse channel {channel_number}. {}",
-                        error_message
-                            .replace("\n", " ") // cannot handle new lines, so turn into spaces
-                            .replace("|", " ") // not very meaningful, so turn into spaces
-                            .replace("^", " ") // not very meaningful, so turn into spaces
-                            .replace_all("  ", " ")
-                            .replace_all("  ", " ")
-                            .replace_all("  ", " ")
-                    ));
-                }
-
-                _ => {
-                    status_of_rradio
-                        .all_4lines
-                        .update_if_changed(the_channel_error_events.to_lcd_screen().as_str());
-                    status_of_rradio.running_status = RunningStatus::LongMessageOnAll4Lines;
-                }
-            }
-        }
-    }
-    if let Err(playbin_error_message) = playbin.play_track(status_of_rradio, config, lcd, true) {
-        status_of_rradio.all_4lines.update_if_changed(
-            format!(
-                "When playing a track on channel {} got {playbin_error_message}",
-                status_of_rradio.channel_number
-            )
-            .as_str(),
-        );
-        status_of_rradio.running_status = RunningStatus::LongMessageOnAll4Lines;
-    } else {
-        // play worked
-        let line2 = generate_line2(status_of_rradio);
-        status_of_rradio
-            .line_2_data
-            .update_if_changed(line2.as_str());
-        html_helpers::write_status_to_web_page(
-            line2,
-            status_of_rradio.position_and_duration[channel_number]
-                .artist
-                .clone(),
-            web_data_changed_tx,
-        );
-    }
 }

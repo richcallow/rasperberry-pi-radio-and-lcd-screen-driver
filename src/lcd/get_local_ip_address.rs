@@ -1,3 +1,4 @@
+use crate::lcd::ScrollData;
 use crate::mount_media::mount_media;
 use crate::unmount_if_needed;
 use substring::Substring;
@@ -195,6 +196,7 @@ pub fn set_up_wifi_password(
                                             status_of_rradio.network_data = network_data;
                                             status_of_rradio.running_status =
                                                 crate::RunningStatus::Startingup;
+                                            status_of_rradio.all_4lines = ScrollData::new("", 4);
                                             Ok(())
                                         }
                                         Err(error_message) => {

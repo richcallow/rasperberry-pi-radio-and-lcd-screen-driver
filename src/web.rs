@@ -9,6 +9,8 @@ use axum::{
     response::IntoResponse,
     routing::{get, post, put},
 };
+use crate::{EpisodeDataForOnePodcastDownloaded};
+use super::PodcastDataFromToml;
 use gstreamer::ClockTime;
 use tokio::sync::oneshot;
 
@@ -18,6 +20,11 @@ struct EpisodeSelected {
     episode_index: usize,
 }
 
+/// the ammount the user want to advance or skip backwards
+#[derive(serde::Deserialize)]
+struct AdvanceAmount {
+    advance_position:i64,
+}
 
 /// Gives the index number of the podcast that a user has selected.
 /// used when the user has changed the podcast they want ie they want "the Archers"
@@ -28,8 +35,8 @@ struct PodcastIndex {
 
 /// the text enetered by user into the web page
 #[derive(serde::Deserialize)]
-struct PodcastText {
-    new_podcast_text: String,
+struct NewTextFromUser {
+    new_text_from_user: String,
 }
 
 /// a struct of all the data that the Webserver needs to send to the client when the client starts
@@ -52,12 +59,24 @@ pub enum Event {
     /// Gives the index number of the episode that a user has selected.
        episode_index: usize,    },
 
+    /// user want to advance forwards or backwards 
+    AdvancePosition{
+        /// the time in seconds that the user want to advance
+        advance_position: i64,
+    },
+
     /// Received when client side requests structure holding the program status,
     /// typically when the page is loaded
     RequestRRadioStatusReport {
         report_tx: oneshot::Sender<Result<String, std::fmt::Error>>,
     },
     
+    /// Received when client side requests structure holding the program status,
+    /// typically when the page is loaded
+    RequestRRadioPlaylist {
+        report_tx: oneshot::Sender<Result<String, std::fmt::Error>>,
+    },
+
     /// user has pressed the volume down button, so inform the main program
     VolumeDownPressed,
 
@@ -67,29 +86,46 @@ pub enum Event {
         podcast_index: i32,
     },  
 
-    /// user pressed the initialise <button
     PlayPause,
     VolumeUpPressed,
+    NextStation,
+    PreviousStation, 
 
     /// client side wants to set the play position to the given value
     UpdatePosition {
         position_ms: u64,
     },
-    PodcastText {
-        new_podcast_text: String,
+
+    /// can be podcast text, the URL to play or a channel number
+    NewTextFromUser {
+        new_text_from_user: String,
     },
-        DeletePodcast,
+
+    /// user wants the current poscast deleted 
+    DeletePodcast,
 }
 
-use crate::{EpisodeDataForOnePodcastDownloaded};
-use super::PodcastDataFromToml;
+/// The ammount the web user can seek forwards or backwards
+/// The short time SHOULD be smaller than the long time, but no checks are made
+#[derive(Clone, Debug)]
+pub struct SeekTimes{
+    pub short_seek_time: i32,
+    pub long_seek_time:i32,
+}   
+
 
 /// Real-time information as sent to client.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum DataChanged {
     /// gstreamer volume
     Volume(i32),
-    /// Position & Duration as sent to client
+
+    /// if Some, the value is the ammount the user can seek the play position backwards
+    CanSeekBackwards(Option<SeekTimes>),  
+    /// if Some, the value is the ammount the user can seek the play position forwards
+    CanSeekForwards(Option<SeekTimes>),
+    
+    /// Position & Duration of the track being played as sent to client
     Position {
         position: ClockTime,
         duration: Option<ClockTime>,
@@ -159,6 +195,42 @@ impl axum::extract::FromRequestParts<ServerState> for EventsTx {
         Ok(state.events_tx.clone())
     }
 }
+
+async fn handle_list_channels(
+    EventsTx { events_tx }: EventsTx,
+) -> Result<axum::response::Response, axum::response::Response> {
+
+let (report_tx, report_rx) = oneshot::channel();
+
+    events_tx
+        .send(Event::RequestRRadioPlaylist { report_tx })
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to send RequestRRadioPlaylist Event to main loop",
+            )
+                .into_response()
+        })?;
+
+    report_rx
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Main loop never sent playlist",
+            )
+                .into_response()
+        })?
+        .map_err(|std::fmt::Error| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to format rradio playlist",
+            )
+                .into_response()
+        })
+        .map(IntoResponse::into_response)
+}
+
 
 /// The Request Handler for the rradio status report.
 async fn handle_rradio_status_report(
@@ -263,7 +335,7 @@ fn render_events_data_changed(
                             p { @for count in 0.. episode_data_for_one_podcast.data_for_multiple_episodes.len() {                       
                                 p {(episode_data_for_one_podcast.data_for_multiple_episodes[count].date) ("  ")
                                     (episode_data_for_one_podcast.data_for_multiple_episodes[count].subtitle)}
-                                P { button hx-post ="/api/list-of-episodes" hx-swap= "none" name ="episode_index" value = (count) 
+                                p { button hx-post ="/api/list-of-episodes" hx-swap= "none" name ="episode_index" value = (count) 
                                     { "Stream" } }
                                 p {(episode_data_for_one_podcast.data_for_multiple_episodes[count].summary)}
 
@@ -278,6 +350,7 @@ fn render_events_data_changed(
                     .event("list-of-episodes")
                     .data(maud::html!{
                                 center{label { h2{(episode_data_for_one_podcast.channel_title)
+                                    label { h2{(episode_data_for_one_podcast.description)}}
                                 }      
                             }   
                         }
@@ -286,15 +359,62 @@ fn render_events_data_changed(
             }        
         },
 
+        DataChanged::CanSeekBackwards(can_seek)=>{
+            if let Some (seek_time) =  can_seek{ 
+
+                axum::response::sse::Event::default()
+                .event("CAN SEEK_BACKWARDS")
+                .data(
+                    maud::html!({ 
+                        button hx-post ="/api/advance" hx-swap= "none" name ="advance_position"  value = (seek_time.long_seek_time) { ("⏪")}                
+                        button hx-post ="/api/advance" hx-swap= "none" name ="advance_position"  value = (seek_time.short_seek_time) { ("◀" )}               
+                } )
+                        .render()
+                        .into_string(),
+                )} else {
+                axum::response::sse::Event::default()
+                .event("CAN SEEK_BACKWARDS")
+                .data(
+                    maud::html!({ " " } )// if we put a null string ie "" nothing is sent, but a space works 
+                        .render()
+                        .into_string(),
+                )                
+            }
+        }
+
+        DataChanged::CanSeekForwards(can_seek)=>{
+            if let Some (seek_time) = can_seek { 
+                axum::response::sse::Event::default()
+                .event("CAN SEEK_FORWARDS")
+                .data(
+                    maud::html!({ 
+                        button hx-post ="/api/advance" hx-swap= "none" name ="advance_position" value = (seek_time.short_seek_time) { ("▶")}                
+                        button hx-post ="/api/advance" hx-swap= "none" name ="advance_position" value = (seek_time.long_seek_time) { ("⏩" )}    
+                    } )
+                        .render()
+                        .into_string(),
+                )} else {
+                axum::response::sse::Event::default()
+                .event("CAN SEEK_FORWARDS")
+                .data(
+                    maud::html!({ " " } ) // if we put a null string ie "" nothing is sent, but a space works 
+                        .render()
+                        .into_string(),
+                )                
+            }
+        }
+
         DataChanged::Volume(volume) => {
             // Create the SSE Event which will be returned (inside OK(...))
             axum::response::sse::Event::default()
                 .event("volume-changed")
                 .data(
-                    maud::html!({ "Volume:" (volume) } )
+                    maud::html!({ "Vol" (volume) } )
                         .render()
                         .into_string(),
                 )
+
+
         }
         DataChanged::Position { position, duration } => {
             let data = match duration {
@@ -315,7 +435,7 @@ fn render_events_data_changed(
                         ontouchcancel="this.dataset.dragging = 'false'"
                         ;
                 }
-                .render(), // Render to HTML
+                .render(), // Render to HTML <!-- go back a lot-->
                 None => maud::html! { span; }.render(),
             };
 
@@ -406,8 +526,7 @@ pub fn start_server() -> (
                 }),
             )
             
-            .route(
-                "/podcast-changed-by-user",
+            .route("/podcast-changed-by-user",
         post(async |EventsTx { events_tx }, axum::Form(PodcastIndex{podcast_index})| {
                     // the user has changed the podcast they want ie they want "the Archers"
                     _ = events_tx.send(Event::PodcastIndexChanged { podcast_index});
@@ -417,9 +536,9 @@ pub fn start_server() -> (
             .route(
                 "/podcast-text",
                 post(
-                    async |EventsTx { events_tx }, axum::Form(PodcastText { new_podcast_text })| {
-                        _ = events_tx.send(Event::PodcastText {
-                            new_podcast_text: (new_podcast_text.trim().to_string()),
+                    async |EventsTx { events_tx }, axum::Form(NewTextFromUser { new_text_from_user })| {
+                        _ = events_tx.send(Event::NewTextFromUser {
+                            new_text_from_user: (new_text_from_user.trim().to_string()),
                             //we trim it in case there are leading or trailing spaces
                         });
                     },
@@ -430,6 +549,30 @@ pub fn start_server() -> (
                 post(async |EventsTx { events_tx }| {
                     _ = events_tx.send(Event::PlayPause);
                 }),
+                
+            )
+            .route(
+                "/previous",
+                post(async |EventsTx { events_tx }| {
+                    _ = events_tx.send(Event::PreviousStation);
+                }),
+                
+            )            
+            .route(
+                "/next",
+                post(async |EventsTx { events_tx }| {
+                    _ = events_tx.send(Event::NextStation);
+                }),
+                
+            )
+
+
+            .route(
+                "/advance",
+                post(async |EventsTx { events_tx }, axum::Form(AdvanceAmount { advance_position })| {
+                    _ = events_tx.send(Event::AdvancePosition { advance_position: (advance_position)} );
+                }),
+                
             )
             .route(
                 "/volume-up",
@@ -455,8 +598,6 @@ pub fn start_server() -> (
                 post(
                     async |EventsTx { events_tx }, axum::Form(EpisodeSelected { episode_index })| {
                         _ = events_tx.send(Event::EpisodeSelected { episode_index });
-
-  
                     },
                 ),
             );
@@ -474,7 +615,8 @@ pub fn start_server() -> (
         let app = memory_serve::MemoryServe::new(memory_serve::load_assets!("web_static"))
             .into_router()
             .nest("/api", api_router) // strip "/api" from the start of the path and forward to "api_router"
-            .route("/debug", get(handle_rradio_status_report))
+            .route("/list-channels", get(handle_list_channels))
+           .route("/debug", get(handle_rradio_status_report))
             .with_state(ServerState {
                 events_tx: EventsTx { events_tx },
                 data_changed_rx: DataChangedReceiver { data_changed_rx },

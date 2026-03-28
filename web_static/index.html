@@ -10,7 +10,6 @@
     <script src="htmx-ext-sse.js"></script>
     <script src="index.js"></script>
 
-    
     <style>
         .topnav {
             overflow: hidden;
@@ -39,18 +38,25 @@
 
 <body>
     <div id="app" hx-ext="sse" sse-connect="/api/main-page-events">
-        <div class="flex-col fixed-size" style="font-size: 120%;">
+        <div class="flex-col fixed-size" style="font-size: 100%;">
+            <a href="#home" ></a>
             <div class="topnav">
-                <a href="#home" >New RRadio</a>
+                <div>
+                    <button hx-post="/api/previous" hx-swap="none">⎗ </button> <!--previous track-->
+                    new RRadio
+                    <button hx-post="/api/next" hx-swap="none">⎘</button> <!--next track-->
+                </div>
                 <div  style="display: none;" id="linksToMenu">
-                    <a href="#contact">Contact</a>
+                    <a href="/list-channels" target=”_blank” >List channels</a>
                     <a href="/debug" target=”_blank” > Debug</a>
                 </div>
                 <a href="javascript:void(0);" class="icon" onclick="toggleMenu()">☰</a>
             </div>
 
             <div class="buttondiv">
-                <button hx-post="/api/playpause" hx-swap="none">⏯</button> <!-- playpause-->
+                <span sse-swap="CAN SEEK_BACKWARDS">not set</span>
+                <button hx-post="/api/playpause" hx-swap="none">⏯</button>
+                <span sse-swap="CAN SEEK_FORWARDS">not set</span>                
                 <!-- When you click the volume down button, send a POST request to "volume-down" and ignore the response -->
                 <button hx-post="/api/volume-down" hx-swap="none">🔉</button>
                 <span sse-swap="volume-changed">INIT VOLUME</span>
@@ -58,7 +64,7 @@
                 <!-- When you click the volume up button, send a POST request to "volume-up" and ignore the response -->
                 <button hx-post="/api/volume-up" hx-swap="none">🔊</button>
                 <div sse-swap="position-changed"></div>
-                <input type="text" name="new_podcast_text" hx-post="/api/podcast-text" hx-trigger="input"
+                <input type="text" name="new_text_from_user" hx-post="/api/podcast-text" hx-trigger="input"
                     style='width:100%' class="buttondiv"
                     value="Pasting a URL in this box will play the URL or load an RSS">
 
