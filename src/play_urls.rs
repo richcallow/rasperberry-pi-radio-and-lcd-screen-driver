@@ -40,7 +40,7 @@ pub fn play_url(
     if let Err(playbin_error_message) = playbin.play_track(status_of_rradio, config, lcd, true) {
         status_of_rradio.all_4lines.update_if_changed(
             format!(
-                "When playing a track on channel {} got {playbin_error_message}",
+                "in play_url: When playing a track on channel {} got {playbin_error_message}",
                 status_of_rradio.channel_number
             )
             .as_str(),

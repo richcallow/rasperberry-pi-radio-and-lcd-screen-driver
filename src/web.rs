@@ -72,10 +72,16 @@ pub enum Event {
     },
     
     /// Received when client side requests structure holding the program status,
-    /// typically when the page is loaded
     RequestRRadioPlaylist {
         report_tx: oneshot::Sender<Result<String, std::fmt::Error>>,
     },
+
+    /// Received when client side requests information to present to the user on permitted file formats
+    RequestFileFormats {
+        report_tx: oneshot::Sender<Result<String, std::fmt::Error>>,
+    },
+
+
 
     /// user has pressed the volume down button, so inform the main program
     VolumeDownPressed,
@@ -195,6 +201,44 @@ impl axum::extract::FromRequestParts<ServerState> for EventsTx {
         Ok(state.events_tx.clone())
     }
 }
+
+/// this function dispalys to the web user the permitted file formats
+async fn handle_channel_file_format_report(
+    EventsTx { events_tx }: EventsTx,
+) -> Result<axum::response::Response, axum::response::Response> {
+
+let (report_tx, report_rx) = oneshot::channel();
+
+    events_tx
+        .send(Event::RequestFileFormats { report_tx })
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to send RequestFileFormats Event to main loop",
+            )
+                .into_response()
+        })?;
+
+    report_rx
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Main loop never sent playlist",
+            )
+                .into_response()
+        })?
+        .map_err(|std::fmt::Error| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to format rradio playlist",
+            )
+                .into_response()
+        })
+        .map(IntoResponse::into_response)
+}
+
+
 
 async fn handle_list_channels(
     EventsTx { events_tx }: EventsTx,
@@ -435,7 +479,7 @@ fn render_events_data_changed(
                         ontouchcancel="this.dataset.dragging = 'false'"
                         ;
                 }
-                .render(), // Render to HTML <!-- go back a lot-->
+                .render(), // Render to HTML
                 None => maud::html! { span; }.render(),
             };
 
@@ -604,19 +648,13 @@ pub fn start_server() -> (
             
 
         // The top-level application router, called whenever the client makes an HTTP request
-        /*let g= memory_serve::load!().index_file(&"web_static").into_router()
-        .nest("/api", api_router)
-                    .route("/1", get(handle_rradio_status_report))
-         .with_state(ServerState {
-                events_tx: EventsTx { events_tx },
-                data_changed_rx: DataChangedReceiver { data_changed_rx },
-            });
-        */
         let app = memory_serve::MemoryServe::new(memory_serve::load_assets!("web_static"))
             .into_router()
             .nest("/api", api_router) // strip "/api" from the start of the path and forward to "api_router"
             .route("/list-channels", get(handle_list_channels))
+           .route("/channel-file-formats", get(handle_channel_file_format_report))
            .route("/debug", get(handle_rradio_status_report))
+          
             .with_state(ServerState {
                 events_tx: EventsTx { events_tx },
                 data_changed_rx: DataChangedReceiver { data_changed_rx },

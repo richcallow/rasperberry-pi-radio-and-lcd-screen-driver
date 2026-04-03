@@ -1,5 +1,4 @@
 use crate::get_channel_details::{ChannelErrorEvents, SourceType};
-use crate::my_dbg;
 use crate::player_status::PlayerStatus;
 use crate::read_config::MediaDetails;
 use std::fs;
@@ -88,7 +87,6 @@ pub fn mount_media(media_details: &mut MediaDetails) -> Result<String, ChannelEr
             const OS_ERROR_NO_SUCH_DEVICE_OR_ADDRESS: i32 = 6;
             const OS_RESOURCE_BUSY: i32 = 16;
             let mount_error_as_option = mount_error.raw_os_error();
-            my_dbg!("calling zz");
             media_details.is_mounted = false; // whatever the previous status was, now we have failed
             match mount_error_as_option {
                 Some(OS_ERROR_NO_SUCH_FILE_OR_DIRECTORY) => Err(ChannelErrorEvents::NoUSBDevice),
@@ -151,26 +149,23 @@ fn mount_exact_drive_unknown(
                             &one_output_line["Disk|".len()..one_output_line.len() - 1]
                         );
                         // at this point, we have found a mountable Samba drive, but we do not know if it is the correct one
+
                         local_media_details.device = new_device;
                         local_media_details.disk_identifier = None; // set to None so we use the simpler mount function 
                         match mount_media(&mut local_media_details) {
                             Ok(mount_folder) => match fs::read_dir(&mount_folder) {
                                 Ok(read_dir) => {
                                     if let Some(disk_identifier) = &media_details.disk_identifier {
-                                        // loking in all the top level files & folders to see if one matches
-                                        for folder_as_result in read_dir {
-                                            if let Ok(folder) = folder_as_result
-                                                && disk_identifier
-                                                    == &folder
-                                                        .file_name()
-                                                        .to_string_lossy()
-                                                        .to_string()
+                                        // looking in all the top level files & folders to see if one matches
+                                        for folder in read_dir.flatten() {
+                                            if disk_identifier
+                                                == &folder.file_name().to_string_lossy().to_string()
                                             {
-                                                my_dbg!(&mount_folder);
                                                 media_details.is_mounted = true;
                                                 return Ok(mount_folder);
                                             }
                                         }
+
                                     }
                                     // if we get here, the share we looked at was not the wanted one
                                     // so unmount it

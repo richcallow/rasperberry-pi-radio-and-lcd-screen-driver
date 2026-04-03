@@ -9,7 +9,7 @@ use crate::DataChanged;
 use crate::RunningStatus;
 use crate::get_channel_details::SourceType;
 use crate::html_helpers::{write_message_to_web_page, write_status_to_web_page};
-use crate::my_dbg;
+use crate::player_status::NUMBER_OF_POSSIBLE_CHANNELS;
 use crate::read_config;
 use crate::store_channel_details_and_implement_them;
 use gstreamer::ClockTime;
@@ -24,13 +24,13 @@ pub fn play_channel(
     lcd: &mut crate::lcd::Lc,
     web_data_changed_tx: &tokio::sync::broadcast::Sender<DataChanged>,
 ) {
-    status_of_rradio.initialise_for_new_station();
     if channel_number == status_of_rradio.channel_number
-        && status_of_rradio.running_status == RunningStatus::NoChannel
+        && (status_of_rradio.running_status == RunningStatus::NoChannel
+            || status_of_rradio.running_status == RunningStatus::NoChannelRepeated)
     {
         status_of_rradio.running_status = RunningStatus::NoChannelRepeated;
     } else {
-        status_of_rradio.running_status = RunningStatus::RunningNormally;
+        status_of_rradio.initialise_for_new_station();
         status_of_rradio.position_and_duration[status_of_rradio.channel_number].position =
             ClockTime::ZERO;
         status_of_rradio.line_2_data.update_if_changed("");
@@ -59,8 +59,11 @@ pub fn play_channel(
             }
             SourceType::UrlList | SourceType::UnknownSource => {
                 let _ = web_data_changed_tx.send(web::DataChanged::CanSeekBackwards(None));
-
                 let _ = web_data_changed_tx.send(web::DataChanged::CanSeekForwards(None));
+                let _ = web_data_changed_tx.send(web::DataChanged::Position {
+                    position: ClockTime::from_nseconds(0),
+                    duration: None,
+                });
             }
         }
 
@@ -71,7 +74,6 @@ pub fn play_channel(
             previous_channel_number,
             lcd,
         ) {
-            my_dbg!(format!("{:?}", the_channel_error_events));
             write_message_to_web_page(
                 format!("{:?}", the_channel_error_events),
                 String::new(),
@@ -122,6 +124,14 @@ pub fn play_channel(
                 }
             }
         }
+
+
+        if status_of_rradio.channel_number > NUMBER_OF_POSSIBLE_CHANNELS {
+            let _ = web_data_changed_tx.send(web::DataChanged::Position {
+                position: ClockTime::from_nseconds(0),
+                duration: None,
+            });
+        }
     }
     if let Err(playbin_error_message) = playbin.play_track(status_of_rradio, config, lcd, true) {
         status_of_rradio.all_4lines.update_if_changed(
@@ -138,12 +148,6 @@ pub fn play_channel(
         status_of_rradio
             .line_2_data
             .update_if_changed(line2.as_str());
-        write_message_to_web_page(
-            line2,
-            status_of_rradio.position_and_duration[channel_number]
-                .artist
-                .clone(),
-            web_data_changed_tx,
-        );
+        write_status_to_web_page(status_of_rradio, web_data_changed_tx);
     }
 }

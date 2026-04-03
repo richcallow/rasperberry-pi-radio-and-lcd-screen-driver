@@ -1,8 +1,8 @@
 use super::{DataChanged, EpisodeDataForOnePodcastDownloaded, web};
 use crate::{
     extract_html::extract,
-    my_dbg,
-    player_status::{self, PlayerStatus},
+    lcd::RunningStatus,
+    player_status::PlayerStatus,
 };
 
 /// Work out if a podcast string is an RSS feed, & if it is, return the name of the podcast
@@ -29,7 +29,7 @@ pub fn write_message_to_web_page(
     main_message: String,
     secondary_message: String,
     web_data_changed_tx: &tokio::sync::broadcast::Sender<DataChanged>,
-) {
+) {  
     let _ = web_data_changed_tx.send(web::DataChanged::EpisodeDataForOnePodcast {
         episode_data_for_one_podcast: EpisodeDataForOnePodcastDownloaded {
             channel_title: main_message,
@@ -53,16 +53,14 @@ pub fn write_status_to_web_page(
     if status_of_rradio.line_1_data.text.contains("Error")
         || status_of_rradio.line_1_data.text.contains("error")
     {
-        my_dbg!(status_of_rradio.line_1_data.text.clone());
         secondary = format!("{} {}", status_of_rradio.line_1_data.text, secondary);
     }
 
     if !status_of_rradio.all_4lines.text.is_empty() {
-        my_dbg!(status_of_rradio.line_1_data.text.clone());
         secondary = format!("{} {}", status_of_rradio.all_4lines.text, secondary);
     }
 
-    if status_of_rradio.channel_number < player_status::NUMBER_OF_POSSIBLE_CHANNELS {
+    if status_of_rradio.running_status == RunningStatus::RunningNormally {
         write_message_to_web_page(
             format!(
                 "channel {} {}",
@@ -71,7 +69,8 @@ pub fn write_status_to_web_page(
             secondary,
             web_data_changed_tx,
         )
-    } else {// do not output the channel number as it is not a real one.
+    } else {
+        // do not output the channel number as it is not a real one.
         write_message_to_web_page(
             status_of_rradio.line_2_data.text.clone(),
             secondary,

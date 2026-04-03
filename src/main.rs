@@ -463,8 +463,6 @@ async fn main() -> Result<(), String> {
                                                     .organisation
                                                     != organization
                                                 {
-                                                    my_dbg!(organization);
-
                                                     status_of_rradio.position_and_duration
                                                         [status_of_rradio.channel_number]
                                                         .channel_data
@@ -641,7 +639,7 @@ async fn main() -> Result<(), String> {
                                 playbin.play_track(&mut status_of_rradio, &config, &mut lcd, true)
                             {
                                 status_of_rradio.all_4lines.update_if_changed(
-                                    format!("When playing a track on channel {} got {playbin_error_message}", status_of_rradio.channel_number)
+                                    format!("In main: When playing a track on channel {} got {playbin_error_message}", status_of_rradio.channel_number)
                                         .as_str());
                                 status_of_rradio.running_status =
                                     RunningStatus::LongMessageOnAll4Lines;
@@ -818,6 +816,17 @@ async fn main() -> Result<(), String> {
                                 eprintln!("Failed to send RRadio playlist to web worker\r");
                             }
                         }
+
+                        web::Event::RequestFileFormats { report_tx } => {
+                            if report_tx
+                                .send(status_of_rradio.display_list_of_valid_channel_formats())
+                                .is_err()
+                            {
+                                eprintln!("Failed to send RRadio playlist to web worker\r");
+                            }
+                        }
+
+
 
                         web::Event::VolumeDownPressed => change_volume(
                             -1,

@@ -8,7 +8,7 @@ use crate::{
     player_status::{PlayerStatus, START_UP_DING_CHANNEL_NUMBER},
 };
 
-use crate::lcd;
+use crate::{lcd, my_dbg};
 use std::{fs, os::fd::AsRawFd};
 use substring::Substring;
 
@@ -16,17 +16,27 @@ use crate::mount_media::{self, mount_media_for_current_channel};
 
 /// The data about channel being played extracted from the TOML file.
 /// If there is an error trying to find a channel file, most of these entries will be empty
-#[derive(Debug, Default, serde::Deserialize)]
+#[derive(Debug, Default, Clone, serde::Deserialize)]
 //#[serde(default)] // the specification of default means that all fields do not have to be specified
 pub struct ChannelFileDataFromTOML {
+    #[serde(default = "organisation_default")]
     /// The name of the organisation    eg       organisation = "Tradcan"
     pub organisation: String,
     //allows the buffer to fill before we start playing
     pub pause_before_playing_ms: Option<u64>,
     /// What to play       eg       station_url = "https://dc1.serverse.com/proxy/wiupfvnu?mp=/TradCan\"
+    #[serde(default = "station_url_default")]
     pub station_url: Vec<String>,
 
     pub media_details: Option<MediaDetails>,
+}
+
+fn organisation_default() -> String {
+    "The organisation needs to be specified except for CD drives".to_string()
+}
+
+fn station_url_default() -> Vec<String> {
+    Vec::new()
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -39,6 +49,16 @@ pub enum SourceType {
     Cd,
     /// we will play random tracks on this local or remote USB device
     Usb,
+}
+impl std::fmt::Display for SourceType {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            SourceType::Cd => write!(f, "CD"),
+            SourceType::Usb => write!(f, "USB"),
+            SourceType::UrlList => write!(f, "URL"),
+            Self::UnknownSource => write!(f, "Source type is unknown; programming error"),
+        }
+    }
 }
 
 pub const LIST_OF_SUPPORTED_FILE_TYPES: &[&str] = &["mp3", "wav", "ogg", "flac", "m4a"];
@@ -226,7 +246,7 @@ impl ChannelErrorEvents {
                 "Media not specified in TOML file".to_string()
             }
             ChannelErrorEvents::MediaNotMountabletype(source_type) => {
-                format!("{:?} media is not mountable", *source_type)
+                format!("{} media is not mountable", source_type.to_string())
             }
             ChannelErrorEvents::FailedtoGetCDdriveOrDiskStatus(error) => match error {
                 &0 => "No info on CD in drive".to_string(), //CDS_NO_INFO
@@ -423,13 +443,14 @@ struct CdToc {
     last_cd_track: u8,  // end track
 }
 
-/// If successful returns the details of the channel as the struct ChannelFileData
+// If successful returns the details of the channel as the struct ChannelFileData
 /// namely organisation (=CD), station_url & sets the source type to be SourceType::CD
-pub fn get_cd_details(
-    config: &crate::read_config::Config, // the data read from rradio's config.toml
+pub fn play_cd(
+    path_to_cd_drive: &String, // eg /dev/sr0 or /dev/cdrom
+    filename_sound_at_end_of_playlist: &Option<String>,
 ) -> Result<ChannelFileDataDecoded, ChannelErrorEvents> {
     let device =
-        std::fs::File::open("/dev/cdrom") //dev/cdrom is hard coded as it cannot be anything else
+        std::fs::File::open(path_to_cd_drive) //dev/cdrom is hard coded as it cannot be anything else
             .map_err(|err| ChannelErrorEvents::FailedToOpenCdDrive(err.raw_os_error()))?;
 
     const CDROM_DRIVE_STATUS: nix::sys::ioctl::ioctl_num_type = 0x5326; /* Get tray position, etc. */
@@ -476,9 +497,7 @@ pub fn get_cd_details(
     }
     // if we get here everything has worked, so work out if we need to add a ding if one has been specified at the end of the list of tracks.
     let last_track_is_a_ding;
-    if let Some(filename_sound_at_end_of_playlist) =
-        &config.aural_notifications.filename_sound_at_end_of_playlist
-    {
+    if let Some(filename_sound_at_end_of_playlist) = filename_sound_at_end_of_playlist {
         if !station_url.is_empty() {
             // only put a ding if we have found at least one track
             station_url.push(format!("file://{filename_sound_at_end_of_playlist}"));
@@ -592,18 +611,17 @@ fn get_channel_details(
         .usb
         .as_ref()
         .is_some_and(|usb| usb.channel_number == status_of_rradio.channel_number)
-        || config
-            .samba
-            .as_ref()
-            .is_some_and(|samba| samba.channel_number == status_of_rradio.channel_number)
+        || if let Some(media_details) = &status_of_rradio.position_and_duration
+            [status_of_rradio.channel_number]
+            .channel_data
+            .media_details
+        {
+            media_details.device.starts_with("/dev/sd") || media_details.disk_identifier.is_some()
+        } else {
+            false
+        }
     {
         get_channel_details_from_mountable_media(&config.aural_notifications, status_of_rradio)
-    } else if config
-        .cd_channel_number
-        .as_ref()
-        .is_some_and(|cd_channel_number| &status_of_rradio.channel_number == cd_channel_number)
-    {
-        get_cd_details(config)
     } else {
         let directory_entries_in_playlist_folder = std::fs::read_dir(&config.stations_directory)
             .map_err(
@@ -649,9 +667,37 @@ fn get_channel_details(
                             error_message: toml_error.to_string(),
                         }
                     })?;
+
                 // at this point, the channel_toml_data is the data from the channel file
-                if channel_toml_data.media_details.is_some() {
-                    return set_up_playlist(channel_toml_data, config, &mut *status_of_rradio);
+                //status_of_rradio.position_and_duration[status_of_rradio.channel_number]
+                //    .channel_data
+                //    .media_details = channel_toml_data.media_details.clone();
+
+                if let Some(media_details) = channel_toml_data.media_details.clone() {
+                    status_of_rradio.position_and_duration[status_of_rradio.channel_number]
+                        .channel_data
+                        .media_details = Some(media_details.clone());
+                    if media_details.device.starts_with("/dev/sd")
+                        || media_details.disk_identifier.is_some()
+                    {
+                        status_of_rradio.position_and_duration[status_of_rradio.channel_number]
+                            .channel_data
+                            .source_type = SourceType::Usb;
+                    }
+                    if media_details.device.starts_with("/dev/sr")
+                        || media_details.device.starts_with("/dev/cdrom")
+                    {
+                        return play_cd(
+                            &media_details.device,
+                            &config.aural_notifications.filename_sound_at_end_of_playlist,
+                        );
+                    } else {
+                        return set_up_playlist(
+                            channel_toml_data.clone(),
+                            config,
+                            &mut *status_of_rradio,
+                        );
+                    };
                 // it is a playlist, not a simple USB system
                 } else if channel_toml_data.station_url.is_empty() {
                     return Err(ChannelErrorEvents::CouldNotParseChannelFile {
@@ -696,22 +742,21 @@ fn set_up_playlist(
         return Err(ChannelErrorEvents::MediaNotSpecifiedInTomlfile);
     }
 
-    if media_detailsww.device.starts_with("/") {
+    if media_detailsww.device.starts_with("/dev/sd") || media_detailsww.device.starts_with("//") {
         status_of_rradio.position_and_duration[status_of_rradio.channel_number]
             .channel_data
             .source_type = SourceType::Usb
+    } else if media_detailsww.device.starts_with("/dev/cdrom")
+        || media_detailsww.device.starts_with("/dev/sr")
+    {
+        status_of_rradio.position_and_duration[status_of_rradio.channel_number]
+            .channel_data
+            .source_type = SourceType::Cd
     }
+
     status_of_rradio.position_and_duration[status_of_rradio.channel_number]
         .channel_data
-        .media_details = Some(media_detailsww); /*Some(MediaDetails {
-    channel_number: status_of_rradio.channel_number,
-    device: media_detailsww.device,
-    mount_folder: media_detailsww.mount_folder,
-    is_mounted: false,
-    version: media_detailsww.version,
-    authentication_data: media_detailsww.authentication_data,
-    })*/
-
+        .media_details = Some(media_detailsww);
     match mount_media_for_current_channel(status_of_rradio) {
         Ok(mount_folder) => {
             let chosen_album = toml_data.station_url

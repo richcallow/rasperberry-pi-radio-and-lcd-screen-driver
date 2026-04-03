@@ -54,11 +54,8 @@ pub struct Config {
     /// Notification sounds
     pub aural_notifications: AuralNotifications,
 
-    /// channel number of the CD drive, eg 00
-    pub cd_channel_number: Option<usize>, // in the range 0 to 99 inclusive
-
     ///details on the local memory stick
-    pub usb: Option<MediaDetails>, //details on the local memory stick
+    pub usb: Option<UsbConfig>, //details on the local memory stick
 
     ///details of a memory stick on a Samba share
     pub samba: Option<MediaDetails>,
@@ -95,8 +92,6 @@ pub struct AuthenticationData {
 /// needs to start with the following so TOML expects the media details.
 pub struct MediaDetails {
     //details of a local memory stick or a Samba device
-    /// eg channel_number = 88
-    pub channel_number: usize,
     /// eg  device = "//192.168.0.2/volume(sda1)" or ""//192.168.0.2" if disk_identifier is specified
     pub device: String,
 
@@ -146,6 +141,14 @@ pub struct AuralNotifications {
     pub filename_error: Option<String>,
 }
 
+///stores the data about the local USB memory stick
+#[derive(Debug, Default, serde::Deserialize)]
+pub struct UsbConfig {
+    pub channel_number: usize, // eg 99
+    pub device: String,        // typicaly  "/dev/sda1"
+    pub mount_folder: String,  // eg "/home/pi/local_mount_folder"
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -166,7 +169,6 @@ impl Default for Config {
                 scroll_period_ms: 1600, //  the time between scrolls in milli-seconds
             },
             aural_notifications: AuralNotifications::default(),
-            cd_channel_number: None,
             usb: None,
             samba: None,
             max_number_of_remote_pings: 15,
@@ -268,7 +270,6 @@ pub fn insert_usb(config: &Config, status_of_rraadio: &mut PlayerStatus) {
                 source_type: crate::get_channel_details::SourceType::Usb,
                 station_urls: vec![],
                 media_details: Some(MediaDetails {
-                    channel_number: usb.channel_number,
                     authentication_data: None,
                     version: None,
                     device: usb.device.clone(),

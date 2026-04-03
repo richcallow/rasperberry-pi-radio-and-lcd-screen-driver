@@ -5,8 +5,6 @@ use chrono::Utc;
 use gstreamer::ClockTime;
 use substring::Substring;
 
-use super::ChannelErrorEvents;
-
 use crate::{
     get_channel_details::{self, ChannelFileDataDecoded},
     lcd::{
@@ -14,7 +12,7 @@ use crate::{
         get_local_ip_address::{self, NetworkData},
         get_mute_state,
     },
-    ping,
+    my_dbg, ping,
     read_config::{self, Config},
 };
 
@@ -124,7 +122,7 @@ impl PlayerStatus {
             config.aural_notifications
         );
         println!("buffering_duration\t\t{:?}\r", config.buffering_duration);
-        println!("cd_channel_number\t\t{:?}\r", config.cd_channel_number);
+        println!("usb\t\t{:?}\r", config.usb);
         println!("initial_volume\t\t\t{}\r", config.initial_volume);
         println!("input_timeout\t\t\t{:?}\r", config.input_timeout);
         println!(
@@ -149,6 +147,101 @@ impl PlayerStatus {
         println!("long_advance_time\t\t{}\r", config.long_advance_time);
     }
 
+    pub fn display_list_of_valid_channel_formats(&self) -> Result<String, std::fmt::Error> {
+        use std::fmt::Write;
+        let mut report = String::new();
+        writeln!(report, "Example file format for a CD drive")?;
+
+        writeln!(report, "[media_details]")?;
+        writeln!(report, "device = \"/dev/sr0\"")?;
+        writeln!(report, "mount_folder = \"/home/pi/local_mount_folder\"")?;
+
+        writeln!(report, "\r\n[media_details]\r\n")?;
+        writeln!(report, "device = \"/dev/cdrom\"")?;
+        writeln!(report, "mount_folder = \"/home/pi/local_mount_folder\"")?;
+
+        writeln!(report, "\n\rExample file format for an internet stream\n\r")?;
+        writeln!(report, "organisation = \"France Inter\"")?;
+        writeln!(
+            report,
+            "pause_before_playing_ms = 5000         # optional line; the program will wait this number of ms before playing to fill its buffer"
+        )?;
+        writeln!(
+            report,
+            "# this is useful for stations that are not very regular at providing input"
+        )?;
+        writeln!(report, "station_url = [")?;
+        writeln!(
+            report,
+            "\"http://direct.franceinter.fr/live/franceinter-hifi.aac\"  # multiple entries can be added"
+        )?;
+        writeln!(report, "]")?;
+
+        writeln!(report, "\n\rExample file format for an internet stream\n\r")?;
+
+        writeln!(
+            report,
+            "organisation = \"put the name of the organisation here\""
+        )?;
+        writeln!(report, "station_url = [")?;
+        writeln!(
+            report,
+            "\"name of artist goes here/name of disk goes here\","
+        )?;
+        writeln!(
+            report,
+            "\"name of artist2 goes here/name of disk2 goes here\","
+        )?;
+        writeln!(
+            report,
+            "\"name of artist3 goes here/name of disk3 goes here\","
+        )?;
+        writeln!(report, "]")?;
+
+        writeln!(report, "[media_details]")?;
+        writeln!(
+            report,
+            "disk_identifier = \"folder or file name.txt\"  # optional entry, if this is specified, the program will search for a Samba share that contains this file or folder"
+        )?;
+
+        writeln!(
+            report,
+            "version = \"2.0\" #optional entry to specify the Samba version to use"
+        )?;
+        writeln!(report, "mount_folder = \"/home/pi/remote_mount_folder\"")?;
+        writeln!(
+            report,
+            "[media_details.authentication_data]     #omit this entry if there is no authentication data"
+        )?;
+        writeln!(
+            report,
+            "username = \"****\"   # replace the **** with the username"
+        )?;
+        writeln!(
+            report,
+            "password = \"****\"   # replace the **** with the password"
+        )?;
+
+        writeln!(report, "\nexample playlist on local USB stick\n")?;
+
+        writeln!(report, "organisation = \"shanties on local USB\"")?;
+        writeln!(report, "station_url = [")?;
+        writeln!(report, "\"artist1/album name1\",")?;
+        writeln!(report, "\"artist2/album name2\",")?;
+
+        writeln!(report, "]")?;
+
+        writeln!(report, "[media_details]")?;
+        writeln!(report, "channel_number = 90")?;
+        writeln!(report, "device = \"/dev/sda1\"")?;
+        writeln!(report, "mount_folder = \"/home/pi/local_mount_folder\"")?;
+
+        Ok(report)
+    }
+
+    /// generates a list of the valid channels and sorts them into numeric order
+    /// if there are any TOML errors, they are output first  
+    /// TBD check the extension is correct ie is .toml
     pub fn generate_list_of_valid_channels(
         &self,
         config: &Config,
@@ -160,9 +253,11 @@ impl PlayerStatus {
         let file_names_in_playlist_folder =
             std::fs::read_dir(&config.stations_directory).map_err(|_read_error| std::fmt::Error)?;
 
-        for file_name_in_playlist_folder in file_names_in_playlist_folder.flatten() {
-            // As OK, enumerate all the files in the folder
+        let mut channel_number: Vec<String> = Vec::new(); //declare storage for the data we are about to display 
+        let mut channel_name: Vec<String> = Vec::new(); // ditto
 
+        // look for channel files in the list
+        for file_name_in_playlist_folder in file_names_in_playlist_folder.flatten() {
             // we have a filename, but does it start with 2 digits
             let filename = file_name_in_playlist_folder
                 .file_name()
@@ -182,13 +277,44 @@ impl PlayerStatus {
 
                 match toml_result {
                     Ok(toml_data) => {
-                        writeln!(report, "{} \t{}", file_name_in_playlist_folder.file_name().to_string_lossy(), toml_data.organisation)?;
+                        channel_number.push(
+                            file_name_in_playlist_folder
+                                .file_name()
+                                .to_string_lossy()
+                                .to_string(),
+                        );
+                        channel_name.push(toml_data.organisation);
                     }
                     Err(toml_error) => {
-                        writeln!(report, "{} \t{:?}",file_name_in_playlist_folder.file_name().to_string_lossy(), toml_error)?;
+                        writeln!(
+                            report,
+                            "{} \t{:?}",
+                            file_name_in_playlist_folder.file_name().to_string_lossy(),
+                            toml_error
+                        )?;
                     }
                 }
             }
+        }
+
+        // we want the order sorted
+        let permutation = permutation::sort(&channel_number);
+
+        for count in 0..channel_number.len() {
+            writeln!(
+                report,
+                "{} \t{}",
+                permutation.apply_slice(&channel_number)[count],
+                permutation.apply_slice(&channel_name)[count]
+            )?;
+        }
+
+        if let Some(usb) = &config.usb {
+            writeln!(
+                report,
+                "{} Usb \t\tusing device{}",
+                usb.channel_number, usb.device
+            )?;
         }
 
         Ok(report)
@@ -225,7 +351,7 @@ impl PlayerStatus {
             "podcast_data_from_toml\t{:?}",
             self.podcast_data_from_toml
         )?;
-        writeln!(report, "self.podcast_index\t{}", self.podcast_index)?;
+        writeln!(report, "podcast_index\t\t{}", self.podcast_index)?;
         writeln!(
             report,
             "latest_podcast_string\t{:?}",
@@ -248,7 +374,9 @@ impl PlayerStatus {
         writeln!(report, "position_and_duration follow if there are any")?;
         for (channel_count, channel_realtime_data) in self.position_and_duration.iter().enumerate()
         {
-            if !channel_realtime_data.channel_data.station_urls.is_empty() {
+            if channel_count == self.channel_number
+                || !channel_realtime_data.channel_data.station_urls.is_empty()
+            {
                 writeln!(report, "channel_count {}", channel_count)?;
 
                 writeln!(report, "\tartist\t\t\t{}", channel_realtime_data.artist)?;
@@ -285,8 +413,8 @@ impl PlayerStatus {
                 )?;
                 writeln!(
                     report,
-                    "\tchannel_data.source_type\t\t{:?}",
-                    channel_realtime_data.channel_data.source_type
+                    "\tchannel_data.source_type\t\t{}",
+                    channel_realtime_data.channel_data.source_type.to_string()
                 )?;
                 writeln!(
                     report,
