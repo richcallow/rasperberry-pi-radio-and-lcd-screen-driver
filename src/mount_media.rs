@@ -1,34 +1,17 @@
-use crate::get_channel_details::{ChannelErrorEvents, SourceType};
-use crate::player_status::PlayerStatus;
+use crate::get_channel_details::{ChannelErrorEvents, ChannelFileDataDecoded};
 use crate::read_config::MediaDetails;
 use std::fs;
 
 /// Mounts media if the media is a type that is mountable.
 /// Returns the mount folder if the mount is successful.
 pub fn mount_media_for_current_channel(
-    status_of_rradio: &mut PlayerStatus,
+    channel_file_data_decoded: &mut ChannelFileDataDecoded,
 ) -> Result<String, ChannelErrorEvents> {
-    let Some(media_details) = &mut status_of_rradio.position_and_duration
-        [status_of_rradio.channel_number]
-        .channel_data
-        .media_details
-    else {
-        return Ok(String::new()); // Err(ChannelErrorEvents::MediaNotSpecifiedInTomlfile)
-    };
-
-    if status_of_rradio.position_and_duration[status_of_rradio.channel_number]
-        .channel_data
-        .source_type
-        != SourceType::Usb
-    {
-        return Err(ChannelErrorEvents::MediaNotMountabletype(
-            status_of_rradio.position_and_duration[status_of_rradio.channel_number]
-                .channel_data
-                .source_type
-                .clone(),
-        ));
+    if let Some(media_details) = &mut channel_file_data_decoded.media_details {
+        mount_media(media_details)
+    } else {
+        Ok(String::new())
     }
-    mount_media(media_details)
 }
 
 /// Mounts a remote memory stick using Samba or CIFS; sets is_mounted = true if successful
@@ -59,9 +42,8 @@ pub fn mount_media(media_details: &mut MediaDetails) -> Result<String, ChannelEr
         fstype = "cifs";
         data_string = format!("{},iocharset=utf8", data_string); // add on chracter sets
 
-        // check to see
-        if let Some(_disk_identifer) = &media_details.disk_identifier {
-            return mount_exact_drive_unknown(media_details);
+        if media_details.disk_identifier.is_some() {
+            return mount_exact_drive_unknown(media_details); // mount_media_cannot handle it, so use mount_exact_drive_unknown, which can
         };
     } else {
         println!("mounting local mem stick\r");
@@ -73,6 +55,7 @@ pub fn mount_media(media_details: &mut MediaDetails) -> Result<String, ChannelEr
         .flags(sys_mount::MountFlags::RDONLY | sys_mount::MountFlags::NOATIME)
         .data(&data_string)
         .mount(&media_details.device, &media_details.mount_folder);
+
     match mount_result_as_result {
         Ok(_) => {
             media_details.is_mounted = true;
@@ -165,7 +148,6 @@ fn mount_exact_drive_unknown(
                                                 return Ok(mount_folder);
                                             }
                                         }
-
                                     }
                                     // if we get here, the share we looked at was not the wanted one
                                     // so unmount it

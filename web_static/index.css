@@ -1,19 +1,45 @@
+/* base */
 
+div {
+    margin: 1px;
+    padding: 0 2px;
+}
+
+hr {
+    width: 100%;
+}
 
 button {
     font-size: inherit;
 }
 
+/* layout */
+
 .flex-row {
     display: flex;
     flex-flow: row nowrap;
-    align-items: stretch;
+    align-items: center;
+    justify-content: center;
+
+    gap: 1ch;
 }
 
 .flex-col {
     display: flex;
     flex-flow: column nowrap;
     align-items: stretch;
+}
+
+.flex-col.gap{
+    gap: 1em;
+}
+
+.justify-center {
+    justify-content: center;
+}
+
+.items-center {
+    align-items: center;
 }
 
 .fixed-size {
@@ -26,10 +52,9 @@ button {
     flex-grow: 1;
     flex-shrink: 1;
     flex-basis: auto;
-    border: 3px solid blue;
-    padding-left: 2px;
-    padding-right: 2px;
 }
+
+/* components */
 
 #app {
     position: absolute;
@@ -43,10 +68,22 @@ button {
     align-items: stretch;
 }
 
-div {
-    border: 2px solid red;
-    padding-left: 2px;
-    padding-right: 2px;
+#toggleShowMenuButton {
+    position: absolute;
+    right: 0;
+    top: 0;
+
+    color: black;
+    background-color: white;
+}
+
+#toggleShowMenuButton:hover {
+    color: white;
+    background-color: black;
+}
+
+.linksToMenuHidden {
+    display: none;
 }
 
 .buttondiv {
@@ -56,3 +93,5 @@ div {
 .rightmargin {
     margin-right: 5px;
 }
+
+/* utilities */

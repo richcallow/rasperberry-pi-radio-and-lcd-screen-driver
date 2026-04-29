@@ -30,8 +30,10 @@ pub fn play_url(
             source_type: SourceType::UrlList,
             last_track_is_a_ding: false,
             pause_before_playing_ms: None,
-            station_urls: vec![new_text_from_user],
+            random_tracks_wanted: false,
+            station_url: vec![new_text_from_user],
             media_details: None,
+            data_is_initialised:false,
         },
     };
 

@@ -8,6 +8,7 @@ use crate::ChannelErrorEvents;
 use crate::DataChanged;
 use crate::RunningStatus;
 use crate::get_channel_details::SourceType;
+
 use crate::html_helpers::{write_message_to_web_page, write_status_to_web_page};
 use crate::player_status::NUMBER_OF_POSSIBLE_CHANNELS;
 use crate::read_config;
@@ -30,15 +31,13 @@ pub fn play_channel(
     {
         status_of_rradio.running_status = RunningStatus::NoChannelRepeated;
     } else {
-        status_of_rradio.initialise_for_new_station();
-        status_of_rradio.position_and_duration[status_of_rradio.channel_number].position =
-            ClockTime::ZERO;
+        let previous_channel_number = status_of_rradio.channel_number;
+        status_of_rradio.channel_number = channel_number;
+
         status_of_rradio.line_2_data.update_if_changed("");
         status_of_rradio.line_34_data.update_if_changed("");
         status_of_rradio.all_4lines.update_if_changed("");
         write_status_to_web_page(status_of_rradio, web_data_changed_tx);
-        let previous_channel_number = status_of_rradio.channel_number;
-        status_of_rradio.channel_number = channel_number;
 
         match status_of_rradio.position_and_duration[status_of_rradio.channel_number]
             .channel_data
@@ -92,7 +91,7 @@ pub fn play_channel(
                         status_of_rradio.position_and_duration
                             [crate::player_status::START_UP_DING_CHANNEL_NUMBER]
                             .channel_data
-                            .station_urls = vec![format!("file://{ding_filename}")];
+                            .station_url = vec![format!("file://{ding_filename}")];
                         let _ignore_error_if_beep_fails =
                             playbin.play_track(status_of_rradio, config, lcd, false);
                         status_of_rradio.position_and_duration
@@ -124,8 +123,6 @@ pub fn play_channel(
                 }
             }
         }
-
-
         if status_of_rradio.channel_number > NUMBER_OF_POSSIBLE_CHANNELS {
             let _ = web_data_changed_tx.send(web::DataChanged::Position {
                 position: ClockTime::from_nseconds(0),

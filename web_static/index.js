@@ -4,4 +4,8 @@ htmx.onLoad(function () {
             event.preventDefault();
         }
     });
+
+    document.getElementById("toggleShowMenuButton").addEventListener("click", function () {
+        document.getElementById("linksToMenu").classList.toggle("linksToMenuHidden");
+    });
 });

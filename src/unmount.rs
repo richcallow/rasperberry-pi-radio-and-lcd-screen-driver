@@ -1,29 +1,29 @@
-use crate::{
-    player_status::{PlayerStatus, RealTimeDataOnOneChannel},
-};
+use crate::player_status::{PlayerStatus, RealTimeDataOnOneChannel};
 /// Unmounts whatever device is mounted in the mount folder; returns an error string if it fails
 pub fn unmount_if_needed(
     real_time_data_one_channel: &mut RealTimeDataOnOneChannel,
 ) -> Result<(), String> {
-    if let Some(data_one_channel) = &mut real_time_data_one_channel.channel_data.media_details {
-        if !data_one_channel.is_mounted {
+    if let Some(media_details) = &mut real_time_data_one_channel.channel_data.media_details {
+        if !media_details.is_mounted
+            || media_details.device.starts_with("/dev/sr") // no need to unmount a CD drive
+            || media_details.device == "/dev/cdrom"
+        {
             return Ok(());
         }
-        println!("unmounting {:?}\r", data_one_channel);
-        if let Err(error_message) = sys_mount::unmount(
-            &data_one_channel.mount_folder,
-            sys_mount::UnmountFlags::DETACH,
-        ) {
+        println!("unmounting {:?}\r", media_details);
+        if let Err(error_message) =
+            sys_mount::unmount(&media_details.mount_folder, sys_mount::UnmountFlags::DETACH)
+        {
             eprintln!(
                 "Failed to unmount the device mounted on {}. Got error {:?}\r",
-                data_one_channel.mount_folder, error_message
+                media_details.mount_folder, error_message
             );
             return Err(format!(
                 "Failed to unmount the device mounted on {}",
-                data_one_channel.mount_folder
+                media_details.mount_folder
             ));
         } else {
-            data_one_channel.is_mounted = false;
+            media_details.is_mounted = false;
         };
 
         Ok(())

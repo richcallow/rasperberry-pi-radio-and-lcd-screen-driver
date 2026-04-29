@@ -364,27 +364,38 @@ fn render_events_data_changed(
                 axum::response::sse::Event::default()
                 .event("list-of-episodes")
                 .data(
-                    maud::html!{ 
-                        div class="buttondiv" {
-                            h2{ "podcast" (episode_data_for_one_podcast.channel_title) }
-                            div { 
-                            span class= "rightmargin"{ 
-                                ( format!("qqq{}", episode_data_for_one_podcast.description)) 
+                    maud::html! { 
+                        div .buttondiv {
+                            h2 { "podcast " (episode_data_for_one_podcast.channel_title) }
+                            div .flex-row {
+                                span {
+                                    "qqq " (episode_data_for_one_podcast.description) 
+                                }
+                                button hx-post="/api/delete-podcast" hx-swap="none"  background-color=  (25) {
+                                    "Delete " (episode_data_for_one_podcast.channel_title) " podcast"
+                                }
                             }
-                            button hx-post="/api/delete-podcast" hx-swap="none"  background-color=  (25) {
-                                ( format!("Delete {} podcast", episode_data_for_one_podcast.channel_title))}
-                            }
-                            
-                            
-                            p { @for count in 0.. episode_data_for_one_podcast.data_for_multiple_episodes.len() {                       
-                                p {(episode_data_for_one_podcast.data_for_multiple_episodes[count].date) ("  ")
-                                    (episode_data_for_one_podcast.data_for_multiple_episodes[count].subtitle)}
-                                p { button hx-post ="/api/list-of-episodes" hx-swap= "none" name ="episode_index" value = (count) 
-                                    { "Stream" } }
-                                p {(episode_data_for_one_podcast.data_for_multiple_episodes[count].summary)}
 
-                                } // end of for loop content
-                            } // end of for
+                            hr;
+                            
+                            div .flex-col .gap {
+                                @for (index, episode_data) in episode_data_for_one_podcast.data_for_multiple_episodes.iter().enumerate() {
+                                    @if index != 0 {
+                                        hr;
+                                    }
+
+                                    div .flex-col {
+                                        div .flex-row {
+                                            span { (episode_data.date) }
+                                            span { (episode_data.subtitle) }
+                                        }
+                                        div {
+                                            button hx-post ="/api/list-of-episodes" hx-swap= "none" name ="episode_index" value = (index) { "Stream" }
+                                        }
+                                        div { (episode_data.summary) }
+                                    }
+                                }
+                            }
                         }
                     }  
                     .render().into_string(),) // end of .data(
@@ -645,10 +656,9 @@ pub fn start_server() -> (
                     },
                 ),
             );
-            
-
         // The top-level application router, called whenever the client makes an HTTP request
-        let app = memory_serve::MemoryServe::new(memory_serve::load_assets!("web_static"))
+        let app = memory_serve::load!()
+            .cache_control(memory_serve::CacheControl::Custom("must-revalidate"))
             .into_router()
             .nest("/api", api_router) // strip "/api" from the start of the path and forward to "api_router"
             .route("/list-channels", get(handle_list_channels))

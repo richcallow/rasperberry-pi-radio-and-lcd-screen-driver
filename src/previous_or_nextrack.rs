@@ -8,6 +8,7 @@ use super::get_channel_details::SourceType;
 use super::get_mute_state;
 use super::lcd;
 use gstreamer::{SeekFlags, prelude::ElementExtManual};
+use itertools::Itertools;
 
 /// Generates the text for line 2 for the normal running case, ie streaming, USB or CD. Adds the throttled state if the Pi is throttled
 pub fn generate_line2(status_of_rradio: &PlayerStatus) -> String {
@@ -19,7 +20,7 @@ pub fn generate_line2(status_of_rradio: &PlayerStatus) -> String {
             let mut num_tracks = status_of_rradio.position_and_duration
                 [status_of_rradio.channel_number]
                 .channel_data
-                .station_urls
+                .station_url
                 .len();
             if status_of_rradio.position_and_duration[status_of_rradio.channel_number]
                 .channel_data
@@ -39,7 +40,7 @@ pub fn generate_line2(status_of_rradio: &PlayerStatus) -> String {
             let mut num_tracks = status_of_rradio.position_and_duration
                 [status_of_rradio.channel_number]
                 .channel_data
-                .station_urls
+                .station_url
                 .len();
             if status_of_rradio.position_and_duration[status_of_rradio.channel_number]
                 .channel_data
@@ -48,11 +49,58 @@ pub fn generate_line2(status_of_rradio: &PlayerStatus) -> String {
                 num_tracks -= 1
             }
 
-            format!(
-                "{} ({} of {})",
+            let info = if status_of_rradio.position_and_duration[status_of_rradio.channel_number]
+                .channel_data
+                .organisation
+                .is_empty()
+            {
+                let index_to_current_track = status_of_rradio.position_and_duration
+                    [status_of_rradio.channel_number]
+                    .index_to_current_track;
+
+                let current_track = if status_of_rradio.position_and_duration
+                    [status_of_rradio.channel_number]
+                    .channel_data
+                    .station_url
+                    .is_empty()
+                {
+                    "dummypath/ / /dummy.mp3"
+                } else {
+                    &status_of_rradio.position_and_duration[status_of_rradio.channel_number]
+                        .channel_data
+                        .station_url[index_to_current_track]
+                };
+
+                let mut local_artist = status_of_rradio.position_and_duration
+                    [status_of_rradio.channel_number]
+                    .artist
+                    .as_str();
+                let mut local_organisaton = status_of_rradio.position_and_duration
+                    [status_of_rradio.channel_number]
+                    .channel_data
+                    .organisation
+                    .as_str();
+
+                if let Some([_filename, album, artist]) = current_track.rsplit('/').next_array() {
+                    if local_artist.is_empty() {
+                        local_artist = artist;
+                    };
+                    if local_organisaton.is_empty() {
+                        local_organisaton = album;
+                    };
+                }
+
+                format!("{}/{}", local_artist, local_organisaton)
+            } else {
                 status_of_rradio.position_and_duration[status_of_rradio.channel_number]
                     .channel_data
-                    .organisation,
+                    .organisation
+                    .clone()
+            };
+
+            format!(
+                "{} ({} of {})",
+                info,
                 status_of_rradio.position_and_duration[status_of_rradio.channel_number]
                     .index_to_current_track
                     + 1, // +1 as humans start counting at 1, not zero
@@ -106,7 +154,7 @@ pub fn next_track(
         + 1)
         % status_of_rradio.position_and_duration[status_of_rradio.channel_number]
             .channel_data
-            .station_urls
+            .station_url
             .len();
     if let Err(playbin_error_message) = playbin.play_track(status_of_rradio, config, lcd, false) {
         status_of_rradio.all_4lines.update_if_changed(
@@ -147,12 +195,12 @@ pub fn previous_track(
             .index_to_current_track
             + status_of_rradio.position_and_duration[status_of_rradio.channel_number]
                 .channel_data
-                .station_urls
+                .station_url
                 .len()
             - 1)
             % status_of_rradio.position_and_duration[status_of_rradio.channel_number]
                 .channel_data
-                .station_urls
+                .station_url
                 .len(); // % is a remainder operator not modulo
         if let Err(playbin_error_message) = playbin.play_track(status_of_rradio, config, lcd, false)
         {

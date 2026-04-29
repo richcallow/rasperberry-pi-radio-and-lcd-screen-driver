@@ -17,7 +17,6 @@ use anyhow::Context;
 use substring::Substring;
 
 mod character_pattern;
-pub mod get_local_ip_address;
 pub mod get_mute_state;
 mod get_temperature;
 pub mod get_throttled;
@@ -465,7 +464,6 @@ impl Lc {
             }
         }
 
-         //qqqq
     }
 
     /// Fills the text buffer with the start up text before any channel has been selected

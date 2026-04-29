@@ -1,18 +1,14 @@
-use std::fs;
-
 use super::PodcastDataAllStations;
+use super::get_local_ip_address;
 use chrono::Utc;
 use gstreamer::ClockTime;
 use substring::Substring;
 
+use crate::get_local_ip_address::NetworkDataNew;
 use crate::{
-    get_channel_details::{self, ChannelFileDataDecoded},
-    lcd::{
-        self, RunningStatus,
-        get_local_ip_address::{self, NetworkData},
-        get_mute_state,
-    },
-    my_dbg, ping,
+    get_channel_details::{self, ChannelFileDataDecoded, SourceType},
+    lcd::{self, RunningStatus, get_mute_state},
+    ping,
     read_config::{self, Config},
 };
 
@@ -70,7 +66,7 @@ pub struct PlayerStatus {
     /// index_of_podcast, as in which podcast has been selected
     pub podcast_index: i32,
     /// stores SSID, local IP address & gateway address
-    pub network_data: get_local_ip_address::NetworkData,
+    pub network_data: get_local_ip_address::NetworkDataNew,
     pub ping_data: ping::PingData,
     pub all_4lines: lcd::ScrollData,
     pub line_1_data: lcd::ScrollData,
@@ -97,7 +93,7 @@ impl PlayerStatus {
             },
             latest_podcast_string: None,
             podcast_index: 0, // 0 is the index value of the not-selected value
-            network_data: NetworkData::new(),
+            network_data: NetworkDataNew::new(),
             ping_data: ping::PingData::new(),
             all_4lines: lcd::ScrollData::new("", 4),
             line_1_data: lcd::ScrollData::new("", 1),
@@ -122,7 +118,6 @@ impl PlayerStatus {
             config.aural_notifications
         );
         println!("buffering_duration\t\t{:?}\r", config.buffering_duration);
-        println!("usb\t\t{:?}\r", config.usb);
         println!("initial_volume\t\t\t{}\r", config.initial_volume);
         println!("input_timeout\t\t\t{:?}\r", config.input_timeout);
         println!(
@@ -140,8 +135,6 @@ impl PlayerStatus {
             "time_initial_message_displayed_after_channel_change\t{}\r",
             config.time_initial_message_displayed_after_channel_change
         );
-        println!("usb\t\t\t\t{:?}\r", config.usb);
-        println!("samba\t\t\t\t{:?}\r", config.samba);
         println!("volume_offset\t\t\t{}\r", config.volume_offset);
         println!("short_advance_time\t\t{}\r", config.short_advance_time);
         println!("long_advance_time\t\t{}\r", config.long_advance_time);
@@ -154,13 +147,13 @@ impl PlayerStatus {
 
         writeln!(report, "[media_details]")?;
         writeln!(report, "device = \"/dev/sr0\"")?;
-        writeln!(report, "mount_folder = \"/home/pi/local_mount_folder\"")?;
 
-        writeln!(report, "\r\n[media_details]\r\n")?;
+        writeln!(report, "\nor")?;
+
+        writeln!(report, "\n[media_details]")?;
         writeln!(report, "device = \"/dev/cdrom\"")?;
-        writeln!(report, "mount_folder = \"/home/pi/local_mount_folder\"")?;
 
-        writeln!(report, "\n\rExample file format for an internet stream\n\r")?;
+        writeln!(report, "\nExample file format for an internet stream\n")?;
         writeln!(report, "organisation = \"France Inter\"")?;
         writeln!(
             report,
@@ -177,7 +170,10 @@ impl PlayerStatus {
         )?;
         writeln!(report, "]")?;
 
-        writeln!(report, "\n\rExample file format for an internet stream\n\r")?;
+        writeln!(
+            report,
+            "\nExample file format for an playlist file on a Samba share\n"
+        )?;
 
         writeln!(
             report,
@@ -198,10 +194,14 @@ impl PlayerStatus {
         )?;
         writeln!(report, "]")?;
 
+        writeln!(report, "random_tracks_wanted = true #optional entry if you want random tracks")?;
+        writeln!(report, "          # do not specify both this entry & station_url")?;
+
+        
         writeln!(report, "[media_details]")?;
         writeln!(
             report,
-            "disk_identifier = \"folder or file name.txt\"  # optional entry, if this is specified, the program will search for a Samba share that contains this file or folder"
+            "disk_identifier = \"folder or file name.txt\"  # optional entry; as this is specified, the program will search for a Samba share that contains this file or folder"
         )?;
 
         writeln!(
@@ -211,7 +211,7 @@ impl PlayerStatus {
         writeln!(report, "mount_folder = \"/home/pi/remote_mount_folder\"")?;
         writeln!(
             report,
-            "[media_details.authentication_data]     #omit this entry if there is no authentication data"
+            "[media_details.authetication_data]     #omit this entry if there is no authentication data"
         )?;
         writeln!(
             report,
@@ -235,6 +235,8 @@ impl PlayerStatus {
         writeln!(report, "channel_number = 90")?;
         writeln!(report, "device = \"/dev/sda1\"")?;
         writeln!(report, "mount_folder = \"/home/pi/local_mount_folder\"")?;
+
+
 
         Ok(report)
     }
@@ -264,14 +266,17 @@ impl PlayerStatus {
                 .to_string_lossy()
                 .to_string();
 
-            if filename.len() > 1 && str::parse::<i8>(filename.substring(0, 2)).is_ok() {
+            if filename.to_lowercase().ends_with(".toml")
+                && filename.len() > 1
+                && str::parse::<i8>(filename.substring(0, 2)).is_ok()
+            {
                 // now we know that file name starts with 2 digits, ie is a valid channel
                 let channel_file_info =
                     std::fs::read_to_string(file_name_in_playlist_folder.path())
                         .map_err(|_| std::fmt::Error)?;
 
                 let toml_result: Result<
-                    get_channel_details::ChannelFileDataFromTOML,
+                    get_channel_details::ChannelFileDataDecoded,
                     toml::de::Error,
                 > = toml::from_str(channel_file_info.trim_ascii_end());
 
@@ -306,14 +311,6 @@ impl PlayerStatus {
                 "{} \t{}",
                 permutation.apply_slice(&channel_number)[count],
                 permutation.apply_slice(&channel_name)[count]
-            )?;
-        }
-
-        if let Some(usb) = &config.usb {
-            writeln!(
-                report,
-                "{} Usb \t\tusing device{}",
-                usb.channel_number, usb.device
             )?;
         }
 
@@ -375,7 +372,12 @@ impl PlayerStatus {
         for (channel_count, channel_realtime_data) in self.position_and_duration.iter().enumerate()
         {
             if channel_count == self.channel_number
-                || !channel_realtime_data.channel_data.station_urls.is_empty()
+                || !channel_realtime_data.channel_data.station_url.is_empty()
+                || (self.running_status == RunningStatus::Startingup
+                    && self.position_and_duration[channel_count]
+                        .channel_data
+                        .source_type
+                        != SourceType::UnknownSource)
             {
                 writeln!(report, "channel_count {}", channel_count)?;
 
@@ -408,13 +410,13 @@ impl PlayerStatus {
 
                 writeln!(
                     report,
-                    "\tchannel_data.organisation\t\t{:?}",
+                    "\tchannel_data.organisation\t\t{}",
                     channel_realtime_data.channel_data.organisation
                 )?;
                 writeln!(
                     report,
                     "\tchannel_data.source_type\t\t{}",
-                    channel_realtime_data.channel_data.source_type.to_string()
+                    channel_realtime_data.channel_data.source_type
                 )?;
                 writeln!(
                     report,
@@ -428,6 +430,12 @@ impl PlayerStatus {
                 )?;
                 writeln!(
                     report,
+                    "\tchannel_data.random_tracks_wanted\t{:?}",
+                    channel_realtime_data.channel_data.random_tracks_wanted
+                )?;
+
+                writeln!(
+                    report,
                     "\tchannel_data.media_details\t\t{:?}",
                     channel_realtime_data.channel_data.media_details
                 )?;
@@ -436,7 +444,7 @@ impl PlayerStatus {
 
                 for (track_count, station_url) in channel_realtime_data
                     .channel_data
-                    .station_urls
+                    .station_url
                     .iter()
                     .enumerate()
                 {
@@ -446,70 +454,5 @@ impl PlayerStatus {
         }
 
         Ok(report)
-    }
-
-    pub fn output_mount_folder_contents(&self, config: &Config) {
-        if let Some(usb) = &config.usb {
-            let mount_folder = &usb.mount_folder;
-            match fs::read_dir(mount_folder) {
-                Ok(audio_files) => {
-                    println!("folder {:?}\r", audio_files);
-                    for file_as_result in audio_files {
-                        println!("file {:?}\r", file_as_result);
-                    }
-                }
-                Err(message) => {
-                    eprintln!("Failed to read folder and got {:?}\r", message)
-                }
-            }
-        } else {
-            println!("no USB data\r")
-        }
-        if let Some(samba) = &config.samba {
-            let mount_folder = &samba.mount_folder;
-            match fs::read_dir(mount_folder) {
-                Ok(audio_files) => {
-                    println!("folder {:?}\r", audio_files);
-                    for file_as_result in audio_files {
-                        println!("file {:?}\r", file_as_result);
-                    }
-                }
-                Err(message) => {
-                    eprintln!("Failed to read folder and got {:?}\r", message)
-                }
-            }
-        } else {
-            println!("no samba data\r")
-        }
-    }
-
-    /// Tries multiple times to get the WiFi data & store it in self.network_data.
-    /// Sets self.running_status to RunningStatus::LongMessageOnAll4Lines so that its attempts can be seen on the LCD screen
-    /// Sets self.running_status to RunningStatus::Startingup if successful
-    pub fn update_network_data(
-        &mut self,
-        lcd: &mut crate::lcd::Lc,
-        config: &crate::read_config::Config,
-    ) {
-        self.running_status = RunningStatus::LongMessageOnAll4Lines;
-        for count in 0..40 {
-            // go round the loop multiple times looking for the IP address
-            self.all_4lines.update_if_changed(
-                format!("Looking for IP address. Attempt number {count}").as_str(),
-            );
-            lcd.write_rradio_status_to_lcd(self, config);
-
-            match crate::get_local_ip_address::try_once_to_get_wifi_network_data() {
-                Ok(network_data) => {
-                    self.network_data = network_data;
-                    self.running_status = crate::RunningStatus::Startingup;
-                    self.all_4lines.update_if_changed("");
-                    return;
-                }
-                Err(error) => self
-                    .all_4lines
-                    .update_if_changed(format!("Got error {error}  on count {count}").as_str()),
-            }
-        }
     }
 }

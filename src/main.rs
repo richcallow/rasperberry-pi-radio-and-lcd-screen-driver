@@ -11,12 +11,13 @@ use get_channel_details::{ChannelErrorEvents, SourceType};
 use gstreamer::ClockTime;
 use gstreamer::{SeekFlags, prelude::ElementExtManual};
 use gstreamer_interfaces::PlaybinElement;
-use libc::CLD_CONTINUED;
+//use libc::CLD_CONTINUED;/*
 
 mod cd_functions;
 mod extract_html;
 mod get_channel_details;
 mod get_config_file_path;
+pub mod get_local_ip_address;
 mod get_stored_podcast_data;
 mod gstreamer_interfaces;
 mod html_helpers;
@@ -41,13 +42,11 @@ use crate::player_status::{PODCAST_CHANNEL_NUMBER, RealTimeDataOnOneChannel};
 use crate::unmount::unmount_all;
 use crate::web::{DataChanged, SeekTimes};
 use get_channel_details::store_channel_details_and_implement_them;
-use lcd::get_local_ip_address;
 use lcd::{RunningStatus, ScrollData};
 use ping::{get_ping_time, see_if_there_is_a_ping_response};
 use player_status::NUMBER_OF_POSSIBLE_CHANNELS;
 use player_status::PlayerStatus;
 use serde::{Deserialize, Serialize};
-use unmount::unmount_if_needed;
 
 #[macro_export]
 macro_rules! my_dbg {
@@ -126,7 +125,7 @@ async fn main() -> Result<(), String> {
         }
     }
 
-    let mut config_file_path = "config.toml".to_string(); // the default file name of the config TOML file
+    let mut config_file_path = "config2.toml".to_string(); // the default file name of the config TOML file
     let podcastlists_filename: String = "podcastlists.toml".to_string();
 
     let root_folder;
@@ -144,8 +143,10 @@ async fn main() -> Result<(), String> {
     match get_config_file_path::get_config_file_path(&config_file_path) {
         Ok(new_path) => config_file_path = new_path,
         Err(error_message) => {
+            //first send out messages saying failed
             eprintln!("{}", error_message);
             toml_error = Some(error_message);
+            //using html_helpers would be pointless as no IP addresses found yet
         }
     }
 
@@ -172,24 +173,29 @@ async fn main() -> Result<(), String> {
         status_of_rradio.toml_error = Some(toml_error_message);
     }
 
-    read_config::insert_usb(&config, &mut status_of_rradio);
+    match get_local_ip_address::try_once_to_get_wifi_network_data() {
+        Ok(network_data) => status_of_rradio.network_data = network_data,
 
-    // first assume that the WiFi is working and has a valid SSID & Password
-    status_of_rradio.update_network_data(&mut lcd, &config);
+        Err(error) => {
+            let error_string = format!(
+                "When trying to get the IP address for the first time got error {}\r",
+                error
+            );
+            eprint!("{}", error_string);
+            status_of_rradio
+                .all_4lines
+                .update_if_changed(error_string.as_str());
+            status_of_rradio.update_network_data(&mut lcd, &config);
+        }
+    }
 
     if !status_of_rradio.network_data.is_valid {
-        match lcd::get_local_ip_address::set_up_wifi_password(
-            &mut status_of_rradio,
-            &mut lcd,
-            &config,
-        ) {
-            Ok(()) => {}
-            Err(error_message) => {
-                status_of_rradio
-                    .all_4lines
-                    .update_if_changed(error_message.as_str());
-            }
-        };
+        // get the IP addrress from the memorty stick in /dev/sda1
+        if let Err(error) = get_local_ip_address::set_up_wifi_password(&mut status_of_rradio) {
+            status_of_rradio
+                .all_4lines
+                .update_if_changed(error.as_str());
+        }
     }
 
     if gstreamer::init().is_err() {
@@ -210,13 +216,13 @@ async fn main() -> Result<(), String> {
 
     match gstreamer_interfaces::PlaybinElement::setup(&config) {
         Ok((mut playbin, bus_stream)) => {
-            if let Some(filename) = config.aural_notifications.filename_startup.clone() {
+            if let Some(startup_filename) = config.aural_notifications.filename_startup.clone() {
                 status_of_rradio.channel_number = player_status::START_UP_DING_CHANNEL_NUMBER;
 
                 status_of_rradio.position_and_duration
                     [player_status::START_UP_DING_CHANNEL_NUMBER]
                     .channel_data
-                    .station_urls = vec![format!("file://{filename}")];
+                    .station_url = vec![format!("file://{startup_filename}")];
                 status_of_rradio.position_and_duration
                     [player_status::START_UP_DING_CHANNEL_NUMBER]
                     .channel_data
@@ -415,9 +421,7 @@ async fn main() -> Result<(), String> {
                         keyboard::Event::OutputConfigDebug => {
                             status_of_rradio.output_config_information(&config);
                         }
-                        keyboard::Event::OutputMountFolderContents => {
-                            status_of_rradio.output_mount_folder_contents(&config)
-                        }
+
                         keyboard::Event::NewLineOnScreen => println!("\r"), // output a blank line on the screen to aid debugging clarity
                     },
 
@@ -487,13 +491,15 @@ async fn main() -> Result<(), String> {
                                                     [status_of_rradio.channel_number]
                                                     .artist = artist.to_string();
                                                 println!("got new artist!!! {artist:?}\r");
-                                                if status_of_rradio.channel_number
-                                                    == PODCAST_CHANNEL_NUMBER
+                                                if (status_of_rradio.channel_number
+                                                    == PODCAST_CHANNEL_NUMBER)
+                                                    || !artist.is_empty()
                                                 {
                                                     let line2 =
                                                         previous_or_nextrack::generate_line2(
                                                             &status_of_rradio,
                                                         );
+
                                                     status_of_rradio
                                                         .line_2_data
                                                         .update_if_changed(line2.as_str());
@@ -509,37 +515,36 @@ async fn main() -> Result<(), String> {
                                     .update_if_changed(line2.as_str());
                             }
 
-                            MessageView::StateChanged(state_changed) => {
+                            MessageView::StateChanged(state_changed)
                                 if state_changed.src().is_some_and(|state_changed_source| {
                                     *state_changed_source == playbin.playbin_element
                                     // we only want stage changes from playbin0
-                                }) {
-                                    status_of_rradio.gstreamer_state = state_changed.current();
-                                    change_volume(
-                                        0,
-                                        &config,
-                                        &mut status_of_rradio,
-                                        &mut playbin,
-                                        &web_data_changed_tx,
-                                    );
-                                }
+                                }) =>
+                            {
+                                status_of_rradio.gstreamer_state = state_changed.current();
+                                change_volume(
+                                    0,
+                                    &config,
+                                    &mut status_of_rradio,
+                                    &mut playbin,
+                                    &web_data_changed_tx,
+                                );
                             }
 
-                            MessageView::Eos(_end_of_stream) => {
+                            MessageView::Eos(_end_of_stream)
                                 if status_of_rradio.position_and_duration
                                     [status_of_rradio.channel_number]
                                     .channel_data
-                                    .station_urls
+                                    .station_url
                                     .len()
-                                    > 1
-                                {
-                                    previous_or_nextrack::next_track(
-                                        &mut status_of_rradio,
-                                        &playbin,
-                                        &config,
-                                        &mut lcd,
-                                    );
-                                }
+                                    > 1 =>
+                            {
+                                previous_or_nextrack::next_track(
+                                    &mut status_of_rradio,
+                                    &playbin,
+                                    &config,
+                                    &mut lcd,
+                                );
                             }
 
                             MessageView::Error(gstreamer_error) => {
@@ -624,12 +629,13 @@ async fn main() -> Result<(), String> {
                                             episode_data_for_one_podcast_downloaded
                                                 .data_for_multiple_episodes[episode_index]
                                                 .subtitle
-                                                .clone()
                                         ),
                                         source_type: SourceType::UrlList,
                                         last_track_is_a_ding: false,
                                         pause_before_playing_ms: None,
-                                        station_urls: vec![url],
+                                        random_tracks_wanted: false,
+                                        data_is_initialised: false,
+                                        station_url: vec![url],
                                         media_details: None,
                                     },
                                 };
@@ -825,8 +831,6 @@ async fn main() -> Result<(), String> {
                                 eprintln!("Failed to send RRadio playlist to web worker\r");
                             }
                         }
-
-
 
                         web::Event::VolumeDownPressed => change_volume(
                             -1,

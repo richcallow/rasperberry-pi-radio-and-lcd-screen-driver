@@ -1,4 +1,6 @@
+
 use crate::lcd::{LineNum, TextBuffer};
+use crate::player_status::{RealTimeDataOnOneChannel};
 use crate::unmount::unmount_if_needed;
 use crate::{PlayerStatus, mount_media};
 use crate::{
@@ -137,28 +139,15 @@ impl PlaybinElement {
         seek_wanted_if_possible: bool,
     ) -> Result<(), String> {
         if status_of_rradio.running_status != RunningStatus::Startingup
-            && let Err(error) = mount_media::mount_media_for_current_channel(status_of_rradio)
+            && let Err(error) = mount_media::mount_media_for_current_channel(
+                &mut status_of_rradio.position_and_duration[status_of_rradio.channel_number]
+                    .channel_data,
+            )
         {
             return Err(error.to_lcd_screen());
         }
-
-        //if USB is not in use, unmount it, so user can unplug it
-        if let Some(usb_config) = &config.usb
-            && status_of_rradio.position_and_duration[status_of_rradio.channel_number]
-                .channel_data
-                .source_type
-                != SourceType::Usb
-            && let Err(error_message) = unmount_if_needed(
-                &mut status_of_rradio.position_and_duration[usb_config.channel_number],
-            )
-        {
-            return Err(format!(
-                "When unmounting USB stick as it was not being used, got error {}",
-                error_message
-            ));
-        };
-
-        // we must stop gsteamer before we can change it
+         
+        // we must stop gstreamer before we can change it
         if let Err(error) = self.set_state(gstreamer::State::Null) {
             return Err(format!(
                 "Failed to set gstreamer to Null; got error {}",
@@ -170,10 +159,10 @@ impl PlaybinElement {
         match status_of_rradio.running_status {
             RunningStatus::NoChannel
             | RunningStatus::NoChannelRepeated
-            | RunningStatus::LongMessageOnAll4Lines => {
-                if config.aural_notifications.filename_error.is_none() {
-                    return Ok(());
-                }
+            | RunningStatus::LongMessageOnAll4Lines
+                if config.aural_notifications.filename_error.is_none() =>
+            {
+                return Ok(());
             } // return without playing as we ought to play a ding, but one has not been specified
             _ => {}
         }
@@ -181,7 +170,7 @@ impl PlaybinElement {
         if (status_of_rradio.channel_number == player_status::START_UP_DING_CHANNEL_NUMBER)
             && (status_of_rradio.position_and_duration[player_status::START_UP_DING_CHANNEL_NUMBER]
                 .channel_data
-                .station_urls
+                .station_url
                 .is_empty())
         {
             return Ok(()); // we ought to play a ding, but one has not been specified, so return OK as we cannot
@@ -203,7 +192,7 @@ impl PlaybinElement {
         if status_of_rradio.position_and_duration[channel_number].index_to_current_track
             >= status_of_rradio.position_and_duration[channel_number]
                 .channel_data
-                .station_urls
+                .station_url
                 .len()
         {
             // as index_to_current_track is a usize, there is no need to check it it is not negative
@@ -213,7 +202,7 @@ impl PlaybinElement {
                 status_of_rradio.position_and_duration[channel_number].index_to_current_track,
                 status_of_rradio.position_and_duration[channel_number]
                     .channel_data
-                    .station_urls
+                    .station_url
                     .len()
             );
             return Err(format!(
@@ -222,7 +211,7 @@ impl PlaybinElement {
                 index_to_current_track,
                 status_of_rradio.position_and_duration[channel_number]
                     .channel_data
-                    .station_urls
+                    .station_url
                     .len()
             ));
         }
@@ -231,7 +220,7 @@ impl PlaybinElement {
             // if "uri" does not exist, it panics, but that does not seem to be anything that can be done about it.
             &status_of_rradio.position_and_duration[channel_number]
                 .channel_data
-                .station_urls[index_to_current_track],
+                .station_url[index_to_current_track],
         );
 
         if let Some(pause_before_playing_ms) = status_of_rradio.position_and_duration
@@ -315,4 +304,10 @@ impl PlaybinElement {
             }
         }
     }
+}
+pub fn unmount_usb(channel_file_data_decoded: &mut RealTimeDataOnOneChannel) -> Result<(), String> {
+    if channel_file_data_decoded.channel_data.source_type == SourceType::Usb {
+        return unmount_if_needed(channel_file_data_decoded);
+    }
+    Ok(())
 }

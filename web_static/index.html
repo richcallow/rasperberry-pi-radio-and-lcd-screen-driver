@@ -5,54 +5,27 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>New RRadio</title>
+    <link rel="shortcut icon" href="favicon.ico" type="image/x-icon">
     <link rel="stylesheet" href="index.css">
     <script src="htmx.js"></script>
     <script src="htmx-ext-sse.js"></script>
     <script src="index.js"></script>
-
-    <style>
-        .topnav {
-            overflow: hidden;
-            background-color: white;
-            position: relative;
-            font-size: 30px;
-            text-align: center;
-        }
-
-        .topnav a {
-            display: block;
-        }
-
-        .topnav a.icon {
-            position: absolute;
-            right: 0;
-            top: 0;
-        }
-
-        .topnav a.icon:hover {
-            background-color: black;
-            color: white;
-        }
-    </style>
 </head>
 
 <body>
     <div id="app" hx-ext="sse" sse-connect="/api/main-page-events">
-        <div class="flex-col fixed-size" style="font-size: 100%;">
-            <a href="#home" ></a>
-            <div class="topnav">
-                <div>
-                    <button hx-post="/api/previous" hx-swap="none">⎗ </button> <!--previous track-->
-                    new RRadio
-                    <button hx-post="/api/next" hx-swap="none">⎘</button> <!--next track-->
-                </div>
-                <div  style="display: none;" id="linksToMenu">
-                    <a href="/list-channels" target=”_blank” >List channels</a>
-                    <a href="/channel-file-formats" target=”_blank” >Example channel file formats</a>
-                    <a href="/debug" target=”_blank” >Debug</a>
-                    
-                </div>
-                <a href="javascript:void(0);" class="icon" onclick="toggleMenu()">☰</a>
+        <div class="flex-col fixed-size">
+            <div class="flex-row" style="position: relative; font-size: 170%;">
+                <button hx-post="/api/previous" hx-swap="none">⎗ </button> <!--previous track-->
+                <span> new RRadio </span>
+                <button hx-post="/api/next" hx-swap="none">⎘</button> <!--next track-->
+
+                <a href="javascript:void(0);" id="toggleShowMenuButton" class="icon">☰</a>
+            </div>
+            <div id="linksToMenu" class="flex-col items-center linksToMenuHidden" style="gap: 0.5em;">
+                <a href="/list-channels" target=”_blank” >List channels</a>
+                <a href="/channel-file-formats" target=”_blank” >Example channel file formats</a>
+                <a href="/debug" target=”_blank” >Debug</a>
             </div>
 
             <div class="buttondiv">
@@ -78,16 +51,6 @@
             will be here when chosen
         </div>
     </div>
-    <script>
-        function toggleMenu() {
-            var x = document.getElementById("linksToMenu");
-            if (x.style.display === "block") {
-                x.style.display = "none";
-            } else {
-                x.style.display = "block";
-            }
-        }</script>
-
 </body>
 
 </html>

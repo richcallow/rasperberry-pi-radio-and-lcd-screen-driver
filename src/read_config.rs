@@ -4,13 +4,7 @@ use std::time::Duration;
 use gstreamer::ClockTime;
 use string_replace_all::StringReplaceAll;
 
-use crate::{
-    get_channel_details::ChannelFileDataDecoded,
-    player_status::{PlayerStatus, RealTimeDataOnOneChannel},
-};
-
 /// used to convert a TOML string to clock time
-///
 fn deserialize_clocktime<'de, D: serde::Deserializer<'de>>(
     // "de" is, by convention, the name of the lifetime of the input.
     // this function is needed by #[derive(serde::Deserialize)] (called by toml::from_str),
@@ -55,10 +49,7 @@ pub struct Config {
     pub aural_notifications: AuralNotifications,
 
     ///details on the local memory stick
-    pub usb: Option<UsbConfig>, //details on the local memory stick
-
-    ///details of a memory stick on a Samba share
-    pub samba: Option<MediaDetails>,
+    //pub usb: Option<UsbConfig>, //details on the local memory stick
 
     /// the time that the positon will advance (or goback) when the short advance
     /// (or short goback) button is pressed on the web page
@@ -106,6 +97,8 @@ pub struct MediaDetails {
     pub version: Option<String>,
     /// Folder where the remote drive will be mounted;
     /// Must not be the same as the folder where the local USB drive is mounted
+
+    #[serde(default = "empty_string")]
     pub mount_folder: String,
     /// specifies if the device is mounted
     #[serde(skip, default = "is_mounted_default")]
@@ -118,6 +111,9 @@ fn is_mounted_default() -> bool {
     false
 }
 
+fn empty_string() -> String {
+    String::new()
+}
 #[derive(Debug, Default, serde::Deserialize)]
 #[serde(default)]
 /// the paramaters used by the scroll function
@@ -141,14 +137,6 @@ pub struct AuralNotifications {
     pub filename_error: Option<String>,
 }
 
-///stores the data about the local USB memory stick
-#[derive(Debug, Default, serde::Deserialize)]
-pub struct UsbConfig {
-    pub channel_number: usize, // eg 99
-    pub device: String,        // typicaly  "/dev/sda1"
-    pub mount_folder: String,  // eg "/home/pi/local_mount_folder"
-}
-
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -169,8 +157,6 @@ impl Default for Config {
                 scroll_period_ms: 1600, //  the time between scrolls in milli-seconds
             },
             aural_notifications: AuralNotifications::default(),
-            usb: None,
-            samba: None,
             max_number_of_remote_pings: 15,
             short_advance_time: 10,
             long_advance_time: 60,
@@ -226,136 +212,8 @@ impl Config {
                     playlistfilename_sound_at_end_of_playlist
                 ));
             }
-
-            if let Some(usb) = &return_value.usb
-                && !std::path::Path::new(&usb.mount_folder).exists()
-            {
-                return Err(format!(
-                    "local USB mount folder {} specified in TOML file but not found",
-                    usb.mount_folder
-                ));
-            }
-            if let Some(samba) = &return_value.samba {
-                if let Some(usb) = &return_value.usb
-                    && samba.mount_folder == usb.mount_folder
-                {
-                    return Err("Mount folder for local & remote USB must be different".to_string());
-                }
-                if !std::path::Path::new(&samba.mount_folder).exists() {
-                    return Err(format!(
-                        "Remote USB mount folder {} specified in TOML file but not found",
-                        samba.mount_folder
-                    ));
-                }
-            }
         }
 
         return_value_as_result
     }
 }
-
-/// inserts the USB details in the USB part of status_of_rradio
-pub fn insert_usb(config: &Config, status_of_rraadio: &mut PlayerStatus) {
-    if let Some(usb) = &config.usb {
-        status_of_rraadio.position_and_duration[usb.channel_number] = RealTimeDataOnOneChannel {
-            artist: String::new(),
-            address_to_ping: String::new(),
-            index_to_current_track: 0,
-            duration: None,
-            position: ClockTime::ZERO,
-            channel_data: ChannelFileDataDecoded {
-                organisation: String::new(),
-                last_track_is_a_ding: true,
-                pause_before_playing_ms: None,
-                source_type: crate::get_channel_details::SourceType::Usb,
-                station_urls: vec![],
-                media_details: Some(MediaDetails {
-                    authentication_data: None,
-                    version: None,
-                    device: usb.device.clone(),
-                    disk_identifier: None,
-                    mount_folder: usb.mount_folder.clone(),
-                    is_mounted: false,
-                }),
-            },
-        }
-    }
-}
-
-/* sample config file
-
-#this file is read at startup
-# first log entry affect all modules, except those that explicity have their own level. The levels are in the README
-
-stations_directory = "/home/pi/playlists"
-input_timeout = "3s"            # input timeout on the keyboard
-volume_offset = 5               # the ammount the volume changes when going up & down
-initial_volume = 75
-buffering_duration = "20s"
-#pause_before_playing_increment = "1s"          # the increment in the pauses before playing when an infinite stream terminates
-#max_pause_before_playing  = "10s"                      # maximum value of the pause
-
-goto_previous_track_time_delta = 3500
-
-cd_channel_number = 0
-
-max_number_of_remote_pings = 12
-
-[scroll]
-max_scroll = 14         #  maximum ammount of a scroll in charactters
-min_scroll = 6          # minimuum ammount of a scroll
-scroll_period_ms = 1600 # the time between scrollsin misli-seconds
-
-
-#[log_level]
-#"rradio::audio_pipeline::controller::buffering" = "trace"
-
-[aural_notifications]
-filename_startup =  "/home/pi/sounds/KDE-Sys-App-Message.mp3"                   # sound played at startup
-filename_error =    "/home/pi/sounds/KDE-Sys-App-Message.mp3"                   # sound played if there is an error
-filename_sound_at_end_of_playlist =  "/home/pi/sounds/KDE-Sys-App-Message.mp3"  # beep at end of playlist
-
-[usb]
-channel_number = 99
-device= "/dev/sda1"
-mount_folder = "/home/pi/local_mount_folder"
-
-[samba]
-channel_number = 88
-device = "//192.168.0.2/volume(sda1)"
-version = "1.0"
-mount_folder = "/home/pi/88"
-[samba.authentication_data]         # omit this entry if no  authentication data
-username = "the username"
-password = "the password"
-*/
-
-/*
-sample channel is as follows
-
-organisation = "the name "
-station_url = [
-"https://etc "
-]
-
-or with a pause before playing to fill the buffer
-
-organisation = "thename2"
-pause_before_playing_ms = 5000
-station_url = [
-"http://etc   "
-]
-
-
-
-playlist is as follows
-
-organisation = "playlist name"
-station_url = [
-"artist name/disk name",
-"artist name2/disk name2",
-]
-
-device = "/dev/sda1"
-
-*/
