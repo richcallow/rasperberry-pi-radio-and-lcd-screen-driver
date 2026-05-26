@@ -31,6 +31,16 @@ impl Default for NetworkDataNew {
 /// It might fail the first few times it is called, so might need to be called multiple times.
 /// The function assumes the Pi's language is English
 pub fn try_once_to_get_wifi_network_data() -> Result<NetworkDataNew, String> {
+    let ssid = String::from_utf8_lossy(
+        &std::process::Command::new("/usr/sbin/iwgetid")
+            .arg("--raw")
+            .output()
+            .map_err(|error| error.to_string())?
+            .stdout,
+    )
+    .trim_end()
+    .to_owned();
+
     // use the command nmcli -t device show wlan0
     // -t = terse format which is easier to parse
     let output_as_result = std::process::Command::new("/bin/nmcli")
@@ -38,16 +48,12 @@ pub fn try_once_to_get_wifi_network_data() -> Result<NetworkDataNew, String> {
         .output();
     match output_as_result {
         Ok(output) => {
-            let output_as_ascii = unsafe { String::from_utf8_unchecked(output.stdout) }; // convert the output, which is a series of bytes, to a string
+            let output_as_ascii = unsafe { String::from_utf8_unchecked(output.stdout.clone()) }; // convert the output, which is a series of bytes, to a string
             //contains a line such as "GENERAL.STATE   connected " followed by the SSID, or "GENERAL.STATE 30 (disconnected) ; the number spaces is indicative only
             let output_as_a_vec_of_lines: Vec<&str> = // get the output as a vec of individual lines
                     output_as_ascii.split( '\n').collect();
-            const SSID_LINE_NUMBER: usize = 5; // the SSID is on line 5
             const LOCAL_IP_ADDRESS_NUMBER: usize = 7; // the local IP address is on line 7
             const GATEWAY_IP_ADDRESS_NUMBER: usize = 8; // the gateway address is on line 8
-
-            let mut ssid = output_as_a_vec_of_lines[SSID_LINE_NUMBER]; // [5] gives the SSID entry
-            ssid = ssid.substring("GENERAL.CONNECTION:".len(), ssid.len() - 1);
 
             let mut local_ip_address = output_as_a_vec_of_lines[LOCAL_IP_ADDRESS_NUMBER];
 
@@ -57,12 +63,12 @@ pub fn try_once_to_get_wifi_network_data() -> Result<NetworkDataNew, String> {
                 return Err("failed to parse IP address".to_string());
             }
 
-            let mut gateway_ip_address = output_as_a_vec_of_lines[GATEWAY_IP_ADDRESS_NUMBER];
-            gateway_ip_address =
-                gateway_ip_address.substring("IP4.GATEWAY:".len(), gateway_ip_address.len());
+            let gateway_ip_address = output_as_a_vec_of_lines[GATEWAY_IP_ADDRESS_NUMBER]
+                .strip_prefix("IP4.GATEWAY:")
+                .unwrap_or("failed to get address");
 
             Ok(NetworkDataNew {
-                ssid: ssid.to_string(),
+                ssid,
                 local_ip_address: local_ip_address.to_string(),
                 gateway_ip_address: gateway_ip_address.to_string(),
                 is_valid: true,

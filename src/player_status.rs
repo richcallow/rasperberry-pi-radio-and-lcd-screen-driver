@@ -194,10 +194,15 @@ impl PlayerStatus {
         )?;
         writeln!(report, "]")?;
 
-        writeln!(report, "random_tracks_wanted = true #optional entry if you want random tracks")?;
-        writeln!(report, "          # do not specify both this entry & station_url")?;
+        writeln!(
+            report,
+            "random_tracks_wanted = true #optional entry if you want random tracks"
+        )?;
+        writeln!(
+            report,
+            "          # do not specify both this entry & station_url"
+        )?;
 
-        
         writeln!(report, "[media_details]")?;
         writeln!(
             report,
@@ -235,8 +240,6 @@ impl PlayerStatus {
         writeln!(report, "channel_number = 90")?;
         writeln!(report, "device = \"/dev/sda1\"")?;
         writeln!(report, "mount_folder = \"/home/pi/local_mount_folder\"")?;
-
-
 
         Ok(report)
     }
@@ -338,6 +341,7 @@ impl PlayerStatus {
             "mute state is \t\t{}",
             get_mute_state::get_mute_state()
         )?;
+
         writeln!(report, "toml_error\t\t{:?}", self.toml_error)?;
         writeln!(report, "running_status\t\t{:?}", self.running_status)?;
         writeln!(report, "startup folder\t\t{}", self.startup_folder)?;
@@ -372,6 +376,7 @@ impl PlayerStatus {
         for (channel_count, channel_realtime_data) in self.position_and_duration.iter().enumerate()
         {
             if channel_count == self.channel_number
+                || channel_count == 0
                 || !channel_realtime_data.channel_data.station_url.is_empty()
                 || (self.running_status == RunningStatus::Startingup
                     && self.position_and_duration[channel_count]
@@ -423,6 +428,12 @@ impl PlayerStatus {
                     "\tchannel_data.last_track_is_a_ding\t{}",
                     channel_realtime_data.channel_data.last_track_is_a_ding
                 )?;
+                writeln!(
+                    report,
+                    "\tchannel_data.data_is_initialised\t{}",
+                    channel_realtime_data.channel_data.data_is_initialised
+                )?;
+
                 writeln!(
                     report,
                     "\tchannel_data.pause_before_playing_ms\t{:?}",

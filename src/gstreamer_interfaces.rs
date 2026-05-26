@@ -1,6 +1,5 @@
-
 use crate::lcd::{LineNum, TextBuffer};
-use crate::player_status::{RealTimeDataOnOneChannel};
+use crate::player_status::RealTimeDataOnOneChannel;
 use crate::unmount::unmount_if_needed;
 use crate::{PlayerStatus, mount_media};
 use crate::{
@@ -146,7 +145,7 @@ impl PlaybinElement {
         {
             return Err(error.to_lcd_screen());
         }
-         
+
         // we must stop gstreamer before we can change it
         if let Err(error) = self.set_state(gstreamer::State::Null) {
             return Err(format!(
@@ -154,6 +153,8 @@ impl PlaybinElement {
                 error
             ));
         }
+
+        super::set_mute_state(gstreamer::State::Playing);
 
         // see if we need to play an error ding, but one has not been specified
         match status_of_rradio.running_status {

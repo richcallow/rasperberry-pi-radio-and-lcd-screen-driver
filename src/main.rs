@@ -37,7 +37,7 @@ use crate::extract_html::extract;
 use crate::get_channel_details::{ChannelFileDataDecoded, get_ip_address};
 
 use crate::html_helpers::write_status_to_web_page;
-use crate::lcd::get_mute_state::get_mute_state;
+use crate::lcd::get_mute_state::set_mute_state;
 use crate::player_status::{PODCAST_CHANNEL_NUMBER, RealTimeDataOnOneChannel};
 use crate::unmount::unmount_all;
 use crate::web::{DataChanged, SeekTimes};
@@ -343,6 +343,7 @@ async fn main() -> Result<(), String> {
                                     "Could not set the gstreamer state when user hit play//pause\r"
                                 )
                             }
+                            set_mute_state(new_state);
                         }
                         keyboard::Event::EjectCD => {
                             eprintln!("eject result {:?}\r", cd_functions::eject());
@@ -422,7 +423,9 @@ async fn main() -> Result<(), String> {
                             status_of_rradio.output_config_information(&config);
                         }
 
-                        keyboard::Event::NewLineOnScreen => println!("\r"), // output a blank line on the screen to aid debugging clarity
+                        keyboard::Event::NewLineOnScreen => {
+                            println!("\r")
+                        } // output a blank line on the screen to aid debugging clarity
                     },
 
                     Some(Event::GStreamer(gstreamer_message)) => {
@@ -618,7 +621,7 @@ async fn main() -> Result<(), String> {
                             status_of_rradio.position_and_duration[PODCAST_CHANNEL_NUMBER] =
                                 RealTimeDataOnOneChannel {
                                     artist: String::new(),
-                                    address_to_ping: get_ip_address(url.clone()),
+                                    address_to_ping: get_ip_address(url.as_str()),
                                     index_to_current_track: 0,
                                     position: ClockTime::ZERO,
                                     duration: None,
@@ -684,11 +687,14 @@ async fn main() -> Result<(), String> {
                                 } else {
                                     gstreamer::State::Playing
                                 };
+
                             if let Err(_error_message) = playbin.set_state(new_state) {
                                 eprintln!(
                                     "Could not set the gstreamer state when user on web client hit play//pause\r"
                                 )
                             }
+
+                            set_mute_state(new_state);
                         }
 
                         web::Event::PodcastIndexChanged { podcast_index } => {

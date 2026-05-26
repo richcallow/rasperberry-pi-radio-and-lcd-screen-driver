@@ -15,7 +15,7 @@ impl fmt::Display for MuteState {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             MuteState::Muted => write!(f, "muted"),
-            MuteState::NotMuted => write!(f, ""),
+            MuteState::NotMuted => write!(f, "not muted"),
             MuteState::ErrorFound => write!(f, "mute_error"),
             MuteState::NoAmplifier => write!(f, "No amplifier"),
         }
@@ -52,6 +52,38 @@ pub fn get_mute_state() -> MuteState {
                 err_message
             );
             MuteState::ErrorFound
+        }
+    }
+}
+
+/// Sets the mute state of the DigiAMP+ amplfier if there is one, by reading GPIO pin 22
+/// if there is an error outputs a message using eprintln!
+pub fn set_mute_state(mute_state: gstreamer::State) {
+    // this command sets the port low  raspi-gpio set 22 op dl
+    // this command sets the port high raspi-gpio set 22 op dh
+    // GPIO 22 controls whether or not the DigiAMP+ amplifier is muted
+    //
+    const MUTE_PORT: u8 = 22;
+    let all_gpios_and_errors = Gpio::new();
+    match all_gpios_and_errors {
+        Ok(gpios) => match gpios.get(MUTE_PORT) {
+            Ok(pin22) => {
+                let mut pin22_as_output = pin22.into_output();
+                if mute_state == gstreamer::State::Playing {
+                    pin22_as_output.set_high()
+                } else {
+                    pin22_as_output.set_low();
+                }
+            }
+            Err(pin22_err) => {
+                eprintln!("Got error {} when trying to set mute pin", pin22_err,);
+            }
+        },
+        Err(err_message) => {
+            eprintln!(
+                "When trying to get a GPIO pin got the error {}",
+                err_message
+            );
         }
     }
 }

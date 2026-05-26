@@ -9,11 +9,11 @@ use crate::{
     player_status::{PlayerStatus, START_UP_DING_CHANNEL_NUMBER},
 };
 
-use crate::{lcd, my_dbg};
+use crate::lcd;
+use crate::mount_media::{self};
+use gstreamer::ClockTime;
 use std::{fs, os::fd::AsRawFd};
 use substring::Substring;
-use gstreamer::ClockTime;
-use crate::mount_media::{self};
 
 fn station_url_default() -> Vec<String> {
     Vec::new()
@@ -424,7 +424,7 @@ pub fn get_channel_details_from_mountable_media(
             .to_string(),
         station_url: list_of_wanted_tracks,
         source_type: channel_file_data_decoded.source_type.clone(),
-        data_is_initialised: false,
+        data_is_initialised: true,
         last_track_is_a_ding,
         random_tracks_wanted: channel_file_data_decoded.random_tracks_wanted,
         pause_before_playing_ms: channel_file_data_decoded.pause_before_playing_ms,
@@ -519,30 +519,22 @@ pub fn play_cd(
             mount_folder: media_details.mount_folder.clone(),
             is_mounted: true,
         }),
-        data_is_initialised: false,
+        data_is_initialised: true,
     })
 }
 
 /// Given a URL (starting with http) & optionally a port number it extracts the station address.
 /// Given an IP address, it returns the IP address unchanged.
-pub fn get_ip_address(url: String) -> String {
-    let mut source_address = url.clone();
-    if let Some(position_double_slash) = source_address.find("//") {
-        let mut address_to_ping = source_address
-            .split_off(position_double_slash + 2)
-            .to_string(); // we add +2 to split after the //
-        // next if there is a suffix, we must remove it
-        if let Some(position_first_single_slash) = address_to_ping.find('/') {
-            let _suffix = address_to_ping.split_off(position_first_single_slash);
-        } // else there was no suffix so do nothing;
-
-        // but there might be a port number that we have to remove too
-        if let Some(position_of_colon) = address_to_ping.find(':') {
-            let _ = address_to_ping.split_off(position_of_colon);
+pub fn get_ip_address(url: &str) -> String {
+    if let Ok(url2) = url::Url::parse(url) {
+        if let Some(ip_address) = url2.host_str() {
+            ip_address.to_owned()
+        } else {
+            url.to_owned()
         }
-        return address_to_ping;
+    } else {
+        url.to_owned()
     }
-    url
 }
 
 /// Updates status_of_rradio with the new channel data,
@@ -554,11 +546,8 @@ pub fn store_channel_details_and_implement_them(
     previous_channel_number: usize,
     lcd: &mut lcd::Lc,
 ) -> Result<(), ChannelErrorEvents> {
-    my_dbg!(&previous_channel_number);
-    my_dbg!(&status_of_rradio.channel_number);
-
     if status_of_rradio.channel_number != previous_channel_number
-        && status_of_rradio.position_and_duration[previous_channel_number]
+        && status_of_rradio.position_and_duration[status_of_rradio.channel_number]
             .channel_data
             .data_is_initialised
     {
@@ -590,7 +579,8 @@ pub fn store_channel_details_and_implement_them(
                 .is_empty()
             {
                 status_of_rradio.position_and_duration[status_of_rradio.channel_number]
-                    .address_to_ping = get_ip_address(new_channel_file_data.station_url[0].clone());
+                    .address_to_ping =
+                    get_ip_address(new_channel_file_data.station_url[0].as_str());
             }
 
             if status_of_rradio.position_and_duration[status_of_rradio.channel_number]
@@ -698,7 +688,6 @@ fn get_channel_details(
                                             || media_details.device.starts_with("/dev/cdrom")
                                         {
                                             channel_file_data_decoded.source_type = SourceType::Cd;
-
                                             return play_cd(
                                                 &media_details,
                                                 &config

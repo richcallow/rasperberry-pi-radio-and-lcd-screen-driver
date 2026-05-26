@@ -5,7 +5,7 @@ use crate::PODCAST_CHANNEL_NUMBER;
 use crate::RealTimeDataOnOneChannel;
 use crate::RunningStatus;
 use crate::SourceType;
-use crate::get_ip_address;
+use crate::get_channel_details::get_ip_address;
 use crate::previous_or_nextrack::generate_line2;
 use gstreamer::ClockTime;
 
@@ -21,7 +21,7 @@ pub fn play_url(
     status_of_rradio.running_status = RunningStatus::RunningNormally;
     status_of_rradio.position_and_duration[PODCAST_CHANNEL_NUMBER] = RealTimeDataOnOneChannel {
         artist: String::new(),
-        address_to_ping: get_ip_address(new_text_from_user.clone()),
+        address_to_ping: get_ip_address(&new_text_from_user),
         index_to_current_track: 0,
         position: ClockTime::ZERO,
         duration: None,
@@ -33,7 +33,7 @@ pub fn play_url(
             random_tracks_wanted: false,
             station_url: vec![new_text_from_user],
             media_details: None,
-            data_is_initialised:false,
+            data_is_initialised: false,
         },
     };
 

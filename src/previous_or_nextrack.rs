@@ -5,7 +5,6 @@ use super::PlaybinElement;
 use super::PlayerStatus;
 use super::RunningStatus;
 use super::get_channel_details::SourceType;
-use super::get_mute_state;
 use super::lcd;
 use gstreamer::{SeekFlags, prelude::ElementExtManual};
 use itertools::Itertools;
@@ -135,7 +134,7 @@ pub fn generate_line2(status_of_rradio: &PlayerStatus) -> String {
         line2 = format!("{line2} {}", throttled_status.result)
     };
 
-    format!("{} {}", line2, get_mute_state())
+    line2
 }
 
 /// Plays the next track by modulo incrementing status_of_rradio.index_to_current_track
