@@ -8,14 +8,14 @@ pub fn eject() -> Result<(), String> {
     let cdrom_path = eject::discovery::cd_drives().next().unwrap(); // cannot fail in theorey as we have checked we have a CD drive present
     let cdrom = eject::device::Device::open(&cdrom_path).map_err(|error_message| {
         format!(
-            "Got the following error when trying to open the CD drive {:?}",
-            error_message.to_string()
+            "Got the following error when trying to open the CD drive {}",
+            error_message
         )
     })?;
 
     cdrom.eject().map_err(|error_message| {
         format!(
-            "Got the following error when ejecting the CD{:?}",
+            "Got the following error when ejecting the CD{}",
             error_message
         )
     })

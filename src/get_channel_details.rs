@@ -15,6 +15,8 @@ use gstreamer::ClockTime;
 use std::{fs, os::fd::AsRawFd};
 use substring::Substring;
 
+pub const OS_ERROR_NO_SUCH_FILE_OR_DIRECTORY: i32 = 2;
+
 fn station_url_default() -> Vec<String> {
     Vec::new()
 }
@@ -116,6 +118,9 @@ impl Default for ChannelFileDataDecoded {
 /// an enum of errors returned by get_channel_details
 #[derive(Debug)]
 pub enum ChannelErrorEvents {
+    /// could not find the CD that was specified in the playlist
+    CouldNotFindPlaylistCD(String),
+
     /// The message returned if the user enters a channel number that does not exist
     CouldNotFindChannelFile,
 
@@ -179,6 +184,9 @@ impl ChannelErrorEvents {
     /// Given an error enum, returns a string to go on the LCD screen
     pub fn to_lcd_screen(&self) -> String {
         match &self {
+            ChannelErrorEvents::CouldNotFindPlaylistCD(cd_name) => {
+                format!("Could not find {} listed in the playlist", cd_name)
+            }
             ChannelErrorEvents::CouldNotFindChannelFile => "CouldNotFindChannelFile".to_string(),
             ChannelErrorEvents::CouldNotFindSambaShareWithFolder(folder_name) => {
                 if let Some(error_message) = folder_name {
@@ -292,68 +300,79 @@ pub fn get_channel_details_from_mountable_media(
     //get an empty list of all the audio CD images on the USB memory stick or Samba device
     let mut list_of_audio_album_images = Vec::new();
 
-    match fs::read_dir(&mount_folder) {
-        Ok(artists) => {
-            for artist_as_result in artists {
-                if let Ok(artist_dir_entry) = artist_as_result {
-                    match fs::read_dir(artist_dir_entry.path()) {
-                        Ok(albums) => {
-                            for album_as_result in albums {
-                                let album_dir_entry = album_as_result.map_err(|_error| {
-                                    ChannelErrorEvents::USBReadReadError(
-                                        "Read error When trying to read an album".to_string(),
-                                    )
-                                })?;
-
-                                if !album_dir_entry.path().is_dir() {
-                                    continue; /* do not execute the rest of the for loop this time round */
-                                }
-                                let files =
-                                    fs::read_dir(album_dir_entry.path()).map_err(|error| {
-                                        ChannelErrorEvents::USBReadReadError(format!(
-                                            "While searching for music files, got error {}",
-                                            error
-                                        ))
-                                    })?;
-                                for dir_entry_as_result in files {
-                                    let dir_entry = dir_entry_as_result.map_err(|_error| {
+    if channel_file_data_decoded.station_url.is_empty() {
+        // if empty there is no playlist
+        match fs::read_dir(&mount_folder) {
+            Ok(artists) => {
+                for artist_as_result in artists {
+                    if let Ok(artist_dir_entry) = artist_as_result {
+                        match fs::read_dir(artist_dir_entry.path()) {
+                            Ok(albums) => {
+                                for album_as_result in albums {
+                                    let album_dir_entry = album_as_result.map_err(|_error| {
                                         ChannelErrorEvents::USBReadReadError(
-                                            "Failed while searching for audio files in folder"
-                                                .to_string(),
+                                            "Read error When trying to read an album".to_string(),
                                         )
                                     })?;
 
-                                    if is_supported_file_type(dir_entry.file_name().as_ref()) {
-                                        list_of_audio_album_images.push(
-                                            album_dir_entry.path().to_string_lossy().to_string(),
-                                        );
-                                        break;
+                                    if !album_dir_entry.path().is_dir() {
+                                        continue; /* do not execute the rest of the for loop this time round */
+                                    }
+                                    let files =
+                                        fs::read_dir(album_dir_entry.path()).map_err(|error| {
+                                            ChannelErrorEvents::USBReadReadError(format!(
+                                                "While searching for music files, got error {}",
+                                                error
+                                            ))
+                                        })?;
+                                    for dir_entry_as_result in files {
+                                        let dir_entry = dir_entry_as_result.map_err(|_error| {
+                                            ChannelErrorEvents::USBReadReadError(
+                                                "Failed while searching for audio files in folder"
+                                                    .to_string(),
+                                            )
+                                        })?;
+
+                                        if is_supported_file_type(dir_entry.file_name().as_ref()) {
+                                            list_of_audio_album_images.push(
+                                                album_dir_entry
+                                                    .path()
+                                                    .to_string_lossy()
+                                                    .to_string(),
+                                            );
+                                            break;
+                                        }
                                     }
                                 }
                             }
-                        }
-                        Err(error_message) => {
-                            const OS_ERROR_NOT_A_DIRECTORY: i32 = 20; // if the error is "not a directory" we skip it.
-                            if error_message.raw_os_error() != Some(OS_ERROR_NOT_A_DIRECTORY) {
-                                return Err(ChannelErrorEvents::USBReadReadError(format!(
-                                    "When trying to get the folder containing the albums got error {}",
-                                    error_message
-                                )));
+                            Err(error_message) => {
+                                const OS_ERROR_NOT_A_DIRECTORY: i32 = 20; // if the error is "not a directory" we skip it.
+                                if error_message.raw_os_error() != Some(OS_ERROR_NOT_A_DIRECTORY) {
+                                    return Err(ChannelErrorEvents::USBReadReadError(format!(
+                                        "When trying to get the folder containing the albums got error {}",
+                                        error_message
+                                    )));
+                                }
                             }
                         }
+                    } else {
+                        return Err(ChannelErrorEvents::USBReadReadError(
+                            "When trying to get the list of artists got error".to_string(),
+                        ));
                     }
-                } else {
-                    return Err(ChannelErrorEvents::USBReadReadError(
-                        "When trying to get the list of artists got error".to_string(),
-                    ));
                 }
             }
+            Err(error_message) => {
+                return Err(ChannelErrorEvents::USBReadReadError(format!(
+                    "When trying to get the folder {} containing the artists got error {}",
+                    mount_folder, error_message
+                )));
+            }
         }
-        Err(error_message) => {
-            return Err(ChannelErrorEvents::USBReadReadError(format!(
-                "When trying to get the folder {} containing the artists got error {}",
-                mount_folder, error_message
-            )));
+    } else {
+        // we have a playlist
+        for folder in &channel_file_data_decoded.station_url {
+            list_of_audio_album_images.push(format!("{}{}", mount_folder, folder));
         }
     }
 
@@ -392,11 +411,17 @@ pub fn get_channel_details_from_mountable_media(
             }
         }
         Err(error_message) => {
-            if let Some(2) = error_message.raw_os_error() {
-                return Err(ChannelErrorEvents::CouldNotFindAlbum(format!(
-                    "whilst getting audio file names, could not find album {}",
-                    chosen_album
-                )));
+            if let Some(OS_ERROR_NO_SUCH_FILE_OR_DIRECTORY) = error_message.raw_os_error() {
+                if channel_file_data_decoded.station_url.is_empty() {
+                    return Err(ChannelErrorEvents::CouldNotFindAlbum(format!(
+                        "whilst getting audio file names, could not find album {}",
+                        chosen_album
+                    )));
+                } else {
+                    return Err(ChannelErrorEvents::CouldNotFindPlaylistCD(
+                        chosen_album.to_string(),
+                    ));
+                }
             }
 
             return Err(ChannelErrorEvents::USBReadReadError(format!(
@@ -595,7 +620,6 @@ pub fn store_channel_details_and_implement_them(
                         .channel_data,
                 )?;
             }
-
             Ok(())
         }
         Err(get_channel_details_error) => {
@@ -820,7 +844,7 @@ fn set_up_playlist_random_albums(
                                                 }
                                             }
                                             Err(error) => eprintln!(
-                                                "whilst enumerating the albums for random tracks got error {}",
+                                                "Whilst enumerating the albums for random tracks got error {}",
                                                 error
                                             ),
                                         }

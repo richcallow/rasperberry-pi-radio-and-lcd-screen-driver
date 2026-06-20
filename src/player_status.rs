@@ -5,6 +5,7 @@ use gstreamer::ClockTime;
 use substring::Substring;
 
 use crate::get_local_ip_address::NetworkDataNew;
+use crate::ping::PingTimeAndDestination;
 use crate::{
     get_channel_details::{self, ChannelFileDataDecoded, SourceType},
     lcd::{self, RunningStatus, get_mute_state},
@@ -93,8 +94,21 @@ impl PlayerStatus {
             },
             latest_podcast_string: None,
             podcast_index: 0, // 0 is the index value of the not-selected value
-            network_data: NetworkDataNew::new(),
-            ping_data: ping::PingData::new(),
+            network_data: NetworkDataNew {
+                ssid: "not known".to_string(),
+                local_ip_address: "8.8.8.8".to_string(),
+                gateway_ip_address: "8.8.8.8".to_string(),
+                is_valid: false,
+            },
+            ping_data: ping::PingData {
+                can_send_ping: true,
+                last_ping_time_of_day: chrono::Utc::now(),
+                ping_time_and_destination: PingTimeAndDestination {
+                    time_in_ms: None,
+                    destination: ping::PingWhere::Nothing,
+                },
+                number_of_pings_to_this_channel: 0,
+            },
             all_4lines: lcd::ScrollData::new("", 4),
             line_1_data: lcd::ScrollData::new("", 1),
             line_2_data: lcd::ScrollData::new("", 1),
@@ -117,7 +131,7 @@ impl PlayerStatus {
             "\r\nconfigdata\r\naural_notifications\t\t{:?}\r",
             config.aural_notifications
         );
-        println!("buffering_duration\t\t{:?}\r", config.buffering_duration);
+        println!("buffer_duration\t\t{:?}\r", config.buffer_duration);
         println!("initial_volume\t\t\t{}\r", config.initial_volume);
         println!("input_timeout\t\t\t{:?}\r", config.input_timeout);
         println!(
@@ -130,6 +144,8 @@ impl PlayerStatus {
             "goto_previous_track_time_delta\t{:?}\r",
             config.goto_previous_track_time_delta
         );
+        println!("config.start_times\t\t{:?}\r", config.start_times);
+
         println!("stations_directory\t\t{}\r", config.stations_directory);
         println!(
             "time_initial_message_displayed_after_channel_change\t{}\r",
@@ -239,7 +255,7 @@ impl PlayerStatus {
         writeln!(report, "[media_details]")?;
         writeln!(report, "channel_number = 90")?;
         writeln!(report, "device = \"/dev/sda1\"")?;
-        writeln!(report, "mount_folder = \"/home/pi/local_mount_folder\"")?;
+        writeln!(report, "mount_folder = \"/home/pi/local_mount_folder\"")?; // name of the folder must be the same as used elsewhere 
 
         Ok(report)
     }
@@ -376,7 +392,6 @@ impl PlayerStatus {
         for (channel_count, channel_realtime_data) in self.position_and_duration.iter().enumerate()
         {
             if channel_count == self.channel_number
-                || channel_count == 0
                 || !channel_realtime_data.channel_data.station_url.is_empty()
                 || (self.running_status == RunningStatus::Startingup
                     && self.position_and_duration[channel_count]

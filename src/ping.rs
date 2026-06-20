@@ -62,23 +62,6 @@ pub struct PingData {
     pub ping_time_and_destination: PingTimeAndDestination,
     pub number_of_pings_to_this_channel: u32,
 }
-impl PingData {
-    pub fn new() -> Self {
-        Self {
-            last_ping_time_of_day: chrono::Utc::now(),
-            can_send_ping: true,
-            ping_time_and_destination: PingTimeAndDestination {
-                time_in_ms: None,
-                destination: PingWhere::Nothing,
-            },
-            number_of_pings_to_this_channel: 0,
-        }
-    }
-
-}
-impl Default for PingData{
-    fn default() -> Self{PingData::new()}
-}
 
 /// Sends a ping to the local or remote address as required.
 /// Panics if it cannot ping.
@@ -98,7 +81,7 @@ pub fn send_ping(
     let address = if (number_of_remote_pings_to_this_channel & 1 != 0)
         || (number_of_remote_pings_to_this_channel > config.max_number_of_remote_pings)
     {
-        status_of_rradio.network_data.gateway_ip_address.to_string()
+        status_of_rradio.network_data.gateway_ip_address.clone()
     } else {
         status_of_rradio.position_and_duration[status_of_rradio.channel_number]
             .address_to_ping

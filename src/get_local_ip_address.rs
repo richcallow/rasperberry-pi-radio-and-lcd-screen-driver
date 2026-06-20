@@ -1,6 +1,5 @@
 use crate::player_status::PlayerStatus;
 use std::fs;
-use substring::Substring;
 
 #[derive(Debug)]
 /// if is_valid is true, contains the SSID, local & gateway IP addresses as strings.
@@ -9,22 +8,6 @@ pub struct NetworkDataNew {
     pub local_ip_address: String, // these are only ever used as a string, so it is simpler to keep them as a string
     pub gateway_ip_address: String,
     pub is_valid: bool,
-}
-impl NetworkDataNew {
-    /// initialises SSID, local & gateway IP addresses to 8.8.8.8" & sets is_valid false
-    pub fn new() -> Self {
-        NetworkDataNew {
-            ssid: "not known".to_string(),
-            local_ip_address: "8.8.8.8".to_string(),
-            gateway_ip_address: "8.8.8.8".to_string(),
-            is_valid: false,
-        }
-    }
-}
-impl Default for NetworkDataNew {
-    fn default() -> Self {
-        NetworkDataNew::new()
-    }
 }
 
 /// Tries once to get the IP address of the Pi's Wi-Fi interface, the IP address of the gateway & the SSID.
@@ -41,40 +24,23 @@ pub fn try_once_to_get_wifi_network_data() -> Result<NetworkDataNew, String> {
     .trim_end()
     .to_owned();
 
-    // use the command nmcli -t device show wlan0
-    // -t = terse format which is easier to parse
-    let output_as_result = std::process::Command::new("/bin/nmcli")
-        .args(["-t", "device", "show", "wlan0"]) // on a Pi, the Wi-Fi device is wlan0
-        .output();
-    match output_as_result {
-        Ok(output) => {
-            let output_as_ascii = unsafe { String::from_utf8_unchecked(output.stdout.clone()) }; // convert the output, which is a series of bytes, to a string
-            //contains a line such as "GENERAL.STATE   connected " followed by the SSID, or "GENERAL.STATE 30 (disconnected) ; the number spaces is indicative only
-            let output_as_a_vec_of_lines: Vec<&str> = // get the output as a vec of individual lines
-                    output_as_ascii.split( '\n').collect();
-            const LOCAL_IP_ADDRESS_NUMBER: usize = 7; // the local IP address is on line 7
-            const GATEWAY_IP_ADDRESS_NUMBER: usize = 8; // the gateway address is on line 8
+    let local_ip_address = if let Ok(local_ip_address_found) = local_ip_address::local_ip() {
+        local_ip_address_found.to_string()
+    } else {
+        return Err("Failed to get the local IP address".to_string());
+    };
 
-            let mut local_ip_address = output_as_a_vec_of_lines[LOCAL_IP_ADDRESS_NUMBER];
-
-            if let Some(pos) = local_ip_address.find("/") {
-                local_ip_address = local_ip_address.substring("IP4.ADDRESS[1]:".len(), pos)
-            } else {
-                return Err("failed to parse IP address".to_string());
-            }
-
-            let gateway_ip_address = output_as_a_vec_of_lines[GATEWAY_IP_ADDRESS_NUMBER]
-                .strip_prefix("IP4.GATEWAY:")
-                .unwrap_or("failed to get address");
-
-            Ok(NetworkDataNew {
-                ssid,
-                local_ip_address: local_ip_address.to_string(),
-                gateway_ip_address: gateway_ip_address.to_string(),
-                is_valid: true,
-            })
-        }
-        Err(error) => Err(format!("got error {} when trying to use nmcli\r", error)),
+    if let Ok(gateway_addresses) = getifs::gateway_addrs()
+        && !gateway_addresses.is_empty()
+    {
+        Ok(NetworkDataNew {
+            ssid,
+            local_ip_address: local_ip_address.to_string(),
+            gateway_ip_address: gateway_addresses[0].addr().to_string(),
+            is_valid: true,
+        })
+    } else {
+        Err("Failed to get gateway address".to_string())
     }
 }
 
@@ -109,8 +75,8 @@ impl PlayerStatus {
 }
 
 // set_up_wifi_password can be tested by using
-// nmcli connection show        to find the SSID of the wifi connection in use
-// nmcli connection delete the_ssid of the Wi-Fi connection
+// nmcli connection show        to find the name of the the wifi connection in use
+// nmcli connection delete name-of-the-connection
 // & then running the program
 
 /// Reads from file pass.toml in the device specified in the TOML configuration file the SSID and password & stores them in the operating system.

@@ -361,7 +361,7 @@ impl Lc {
                             unsafe { String::from_utf8_unchecked(output.stdout) }; // convert the output from UTF8 to a string 
 
                         let output_as_a_vec_of_lines: Vec<&str> =
-                            output_as_a_string.split('\n').collect(); // convert the output, which is a series of bytes, to a string
+                            output_as_a_string.lines().collect(); // convert the output, which is a series of bytes, to a string
 
                         let my_pid = std::process::id();
                         for line in output_as_a_vec_of_lines.iter(){

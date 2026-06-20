@@ -1,8 +1,11 @@
 //! reads the config.toml file that configures rrr
 use std::time::Duration;
 
+use chrono::DateTime;
 use gstreamer::ClockTime;
 use string_replace_all::StringReplaceAll;
+
+use crate::player_status::NUMBER_OF_POSSIBLE_CHANNELS;
 
 /// used to convert a TOML string to clock time
 fn deserialize_clocktime<'de, D: serde::Deserializer<'de>>(
@@ -16,6 +19,13 @@ fn deserialize_clocktime<'de, D: serde::Deserializer<'de>>(
     })
 }
 
+use serde::{Deserialize, Serialize};
+#[derive(PartialEq, Debug, Serialize, Deserialize)]
+pub struct StartTime {
+    pub time: String,
+    pub channel: String,
+}
+
 #[derive(Debug, serde::Deserialize)]
 #[serde(default)] // if any field is missing, use the value specified in the default
 /// Holds all the configuration information read from the TOML configuration file
@@ -23,18 +33,24 @@ pub struct Config {
     /// The folder that stores the stations
     pub stations_directory: String, // eg stations_directory = "/boot/playlists2"
 
-    #[serde(with = "humantime_serde")] // this allows us to enter the time for example as          input_timeout = "3s"
     /// The timeout when entering two digit station indices
+    #[serde(with = "humantime_serde")]
+    // this allows us to enter the time for example as          input_timeout = "3s"
     pub input_timeout: Duration, // the duration of the keyboard timeout eg input_timeout = "3s"
 
     /// The change in volume when the user increments or decrements the volume
     pub volume_offset: i32,
 
+    /// The inital volum ewhen the program starts
     pub initial_volume: i32,
 
+    ///buffer-duration is a configuration property for the playbin element that defines the
+    /// maximum amount of media data to buffer in time (measured in nanoseconds) when streaming content over a network
     #[serde(with = "humantime_serde")]
-    pub buffering_duration: Option<Duration>,
+    pub buffer_duration: Option<Duration>,
 
+    /// if the user preses "previous track", within this time, program goes to start of the current track
+    /// if longer, to the previous track
     #[serde(deserialize_with = "deserialize_clocktime")]
     pub goto_previous_track_time_delta: ClockTime,
 
@@ -43,10 +59,14 @@ pub struct Config {
 
     pub max_number_of_remote_pings: u32,
 
-    pub scroll: Scroll, // the parameters that specify how the scroll reacts
+    /// the parameters that specify how the scroll reacts
+    pub scroll: Scroll,
 
     /// Notification sounds
     pub aural_notifications: AuralNotifications,
+
+    /// list of times when the program automatically starts to play a channel
+    pub start_times: Vec<StartTime>,
 
     ///details on the local memory stick
     //pub usb: Option<UsbConfig>, //details on the local memory stick
@@ -73,13 +93,13 @@ fn long_advance_time_default() -> i32 {
 }
 
 #[derive(Debug, Default, PartialEq, Clone, serde::Deserialize)]
+/// Authneticaton data for a Samba share is stored here
 pub struct AuthenticationData {
     pub username: String,
     pub password: String,
 }
 
 #[derive(Debug, PartialEq, Clone, serde::Deserialize)]
-/// optionally specify in config.toml file if you want a local memory stick to work
 /// needs to start with the following so TOML expects the media details.
 pub struct MediaDetails {
     //details of a local memory stick or a Samba device
@@ -123,7 +143,7 @@ pub struct Scroll {
     pub scroll_period_ms: u64,
 }
 
-#[derive(Debug, Default, serde::Deserialize)]
+#[derive(Debug, Default, serde::Deserialize)] // the parameters that specify how the scroll reacts
 #[serde(default)]
 /// Notifications allows rradio to play sounds to notify the user of events
 pub struct AuralNotifications {
@@ -137,19 +157,17 @@ pub struct AuralNotifications {
     pub filename_error: Option<String>,
 }
 
+/// Used when the program cannot find the config.toml file.
 impl Default for Config {
+    /// Used when the program cannot find the config.toml file.
     fn default() -> Self {
         Self {
-            stations_directory: "/boot/playlists3".to_string(),
+            stations_directory: "/home/pi/playlists".to_string(),
             input_timeout: Duration::from_secs(3),
             volume_offset: 5,   // step the volum in 5 dB intervals
             initial_volume: 70, // initial volume is 70 dB
-            buffering_duration: None,
-            //pause_before_playing_increment: Duration::from_secs(1),
-            //max_pause_before_playing: Duration::from_secs(5),
+            buffer_duration: None,
             goto_previous_track_time_delta: ClockTime::from_mseconds(2000),
-            //maximum_error_recovery_attempts: 5,
-            //error_recovery_attempt_count_reset_time: Some(Duration::from_secs(30)),
             time_initial_message_displayed_after_channel_change: ClockTime::from_mseconds(3000),
             scroll: Scroll {
                 max_scroll: 14,         // we want to advance at most that many characters
@@ -160,6 +178,7 @@ impl Default for Config {
             max_number_of_remote_pings: 15,
             short_advance_time: 10,
             long_advance_time: 60,
+            start_times: vec![],
         }
     }
 }
@@ -182,16 +201,16 @@ impl Config {
                 let error = toml_file_parse_error
                     .to_string()
                     .replace("\n", " ") // cannot handle new lines, so turn into spaces
-                    .replace("|", " ") // not very meaningful, so turn into spaces
-                    .replace("^", " ") // not very meaningful, so turn into spaces
-                    .replace_all("  ", " ")
+                    .replace("|", " ") // "|"" are not very meaningful, so turn into spaces
+                    .replace("^", " ") // "^" not very meaningful, so turn into spaces
+                    .replace_all("  ", " ") // get rid of multiple double spaces
                     .replace_all("  ", " ")
                     .replace_all("  ", " ");
 
-                format!("Using file {config_file_path:?} got {error}")
+                format!("Using file {config_file_path:?} got {error}\n")
             });
 
-        //now verify that the specified files exist
+        //now verify that the specified files exist & start times are OK
         if let Ok(return_value) = &return_value_as_result {
             if let Some(filename_startup) = &return_value.aural_notifications.filename_startup
                 && !std::path::Path::new(filename_startup).exists()
@@ -211,6 +230,25 @@ impl Config {
                     "filename_sound_at_end_of_playlist file {} specified in TOML file but not found",
                     playlistfilename_sound_at_end_of_playlist
                 ));
+            }
+
+            for start_time in &return_value.start_times {
+                if let Err(error) =
+                    format!("2023-09-19T{}Z", start_time.time).parse::<DateTime<chrono::Utc>>()
+                {
+                    // the date is arbitrary
+                    return Err(format!(
+                        "When parsing the start time {} got error {}",
+                        start_time.time, error
+                    ));
+                }
+
+                if let Ok(channel_number) = start_time.channel.parse::<usize>()
+                    && channel_number < NUMBER_OF_POSSIBLE_CHANNELS
+                {
+                } else {
+                    return Err(format!("Start channel {} is invalid", start_time.channel));
+                }
             }
         }
 

@@ -201,6 +201,7 @@ pub fn previous_track(
                 .channel_data
                 .station_url
                 .len(); // % is a remainder operator not modulo
+
         if let Err(playbin_error_message) = playbin.play_track(status_of_rradio, config, lcd, false)
         {
             status_of_rradio.all_4lines.update_if_changed(

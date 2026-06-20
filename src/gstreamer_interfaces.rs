@@ -100,10 +100,10 @@ impl PlaybinElement {
         // at this point we have a playbin element with the wanted flags , ie the default with "text" & "video" removed
         //(actually "Deinterlace video if necessary" & "Use software color balance" remain)
 
-        if let Some(buffering_duration) = config.buffering_duration {
+        if let Some(buffer_duration) = config.buffer_duration {
             // the duration is specified in the config file
 
-            if let Ok(duration_as_nanos) = i64::try_from(buffering_duration.as_nanos()) {
+            if let Ok(duration_as_nanos) = i64::try_from(buffer_duration.as_nanos()) {
                 playbin_element.set_property("buffer-duration", duration_as_nanos);
             } else {
                 eprintln!("Failed to set the buffer duration\r")

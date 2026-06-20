@@ -10,6 +10,7 @@ use crate::RunningStatus;
 use crate::get_channel_details::SourceType;
 
 use crate::html_helpers::{write_message_to_web_page, write_status_to_web_page};
+
 use crate::player_status::NUMBER_OF_POSSIBLE_CHANNELS;
 use crate::read_config;
 use crate::store_channel_details_and_implement_them;
@@ -24,7 +25,7 @@ pub fn play_channel(
     playbin: &mut PlaybinElement,
     lcd: &mut crate::lcd::Lc,
     web_data_changed_tx: &tokio::sync::broadcast::Sender<DataChanged>,
-) {
+) -> Result<(), ()> {
     if channel_number == status_of_rradio.channel_number
         && (status_of_rradio.running_status == RunningStatus::NoChannel
             || status_of_rradio.running_status == RunningStatus::NoChannelRepeated)
@@ -78,6 +79,7 @@ pub fn play_channel(
                 String::new(),
                 web_data_changed_tx,
             );
+
             match the_channel_error_events {
                 ChannelErrorEvents::CouldNotFindChannelFile => {
                     status_of_rradio.toml_error = None; // clear the TOML error out, the user must have seen it by now
@@ -115,6 +117,20 @@ pub fn play_channel(
                     ));
                 }
 
+                ChannelErrorEvents::CouldNotFindPlaylistCD(mut artist_and_cd) => {
+                    // at this point artist_and_cd contains the path too, which we want to remove
+                    if let Some(media_details) = &status_of_rradio.position_and_duration
+                        [status_of_rradio.channel_number]
+                        .channel_data
+                        .media_details
+                    {
+                        artist_and_cd = artist_and_cd.split_off(media_details.mount_folder.len());
+                        // it now  contains only the artist & name of the CD
+                    };
+                    status_of_rradio.toml_error =
+                        Some(format!("Could not find playlist item {}", artist_and_cd));
+                    return Err(());
+                }
                 _ => {
                     status_of_rradio
                         .all_4lines
@@ -139,6 +155,7 @@ pub fn play_channel(
             .as_str(),
         );
         status_of_rradio.running_status = RunningStatus::LongMessageOnAll4Lines;
+        Err(())
     } else {
         // play worked
         let line2 = generate_line2(status_of_rradio);
@@ -146,5 +163,6 @@ pub fn play_channel(
             .line_2_data
             .update_if_changed(line2.as_str());
         write_status_to_web_page(status_of_rradio, web_data_changed_tx);
+        Ok(())
     }
 }

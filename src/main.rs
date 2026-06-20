@@ -33,8 +33,8 @@ mod read_config;
 mod unmount;
 mod web;
 
-use crate::extract_html::extract;
 use crate::get_channel_details::{ChannelFileDataDecoded, get_ip_address};
+use crate::{extract_html::extract, lcd::TextBuffer};
 
 use crate::html_helpers::write_status_to_web_page;
 use crate::lcd::get_mute_state::set_mute_state;
@@ -99,7 +99,7 @@ pub struct DataForOnePodcast {
 }
 
 /// data downloaded from internet for the downloaded series of podcasts
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Clone)]
 pub struct EpisodeDataForOnePodcastDownloaded {
     pub channel_title: String,
     pub description: String,
@@ -125,7 +125,7 @@ async fn main() -> Result<(), String> {
         }
     }
 
-    let mut config_file_path = "config2.toml".to_string(); // the default file name of the config TOML file
+    let mut config_file_path = "config.toml".to_string(); // the default file name of the config TOML file
     let podcastlists_filename: String = "podcastlists.toml".to_string();
 
     let root_folder;
@@ -151,7 +151,7 @@ async fn main() -> Result<(), String> {
     }
 
     let config = read_config::Config::from_file(&config_file_path).unwrap_or_else(|error| {
-        toml_error = Some(error);
+        eprint!("{}\nUsing defaults values for the config\n", error);
         read_config::Config::default()
     });
 
@@ -172,7 +172,6 @@ async fn main() -> Result<(), String> {
         // if we got an error we should display it; hopefully, toml_error == none
         status_of_rradio.toml_error = Some(toml_error_message);
     }
-
     match get_local_ip_address::try_once_to_get_wifi_network_data() {
         Ok(network_data) => status_of_rradio.network_data = network_data,
 
@@ -188,9 +187,8 @@ async fn main() -> Result<(), String> {
             status_of_rradio.update_network_data(&mut lcd, &config);
         }
     }
-
     if !status_of_rradio.network_data.is_valid {
-        // get the IP addrress from the memorty stick in /dev/sda1
+        // get the IP address from the memory stick in /dev/sda1
         if let Err(error) = get_local_ip_address::set_up_wifi_password(&mut status_of_rradio) {
             status_of_rradio
                 .all_4lines
@@ -198,12 +196,19 @@ async fn main() -> Result<(), String> {
         }
     }
 
+    let mut text_buffer = TextBuffer::new();
+    //text_buffer.write_text_to_single_line(text_bytes, line);
+    text_buffer.write_text_to_single_line(
+        ScrollData::new("initialising gstreamer", 1).bytes(),
+        lcd::LineNum::Line1,
+    );
+    lcd.write_text_buffer_to_lcd(&text_buffer);
+
     if gstreamer::init().is_err() {
         status_of_rradio.all_4lines = ScrollData::new("Failed it to intialise gstreamer", 4);
         status_of_rradio.running_status = lcd::RunningStatus::LongMessageOnAll4Lines;
         lcd.write_rradio_status_to_lcd(&status_of_rradio, &config);
     };
-
     status_of_rradio.line_1_data = ScrollData::new(
         format!(
             "{} {}",
@@ -213,7 +218,6 @@ async fn main() -> Result<(), String> {
         .as_str(),
         1,
     );
-
     match gstreamer_interfaces::PlaybinElement::setup(&config) {
         Ok((mut playbin, bus_stream)) => {
             if let Some(startup_filename) = config.aural_notifications.filename_startup.clone() {
@@ -234,7 +238,7 @@ async fn main() -> Result<(), String> {
                     lcd.write_rradio_status_to_lcd(&status_of_rradio, &config);
                 }
             } else {
-                println!("No startup ding wanted");
+                println!("No startup ding wanted.");
             }
 
             let keyboard_events = keyboard::setup_keyboard(config.input_timeout);
@@ -399,14 +403,19 @@ async fn main() -> Result<(), String> {
                             );
                         }
                         keyboard::Event::PlayStation { channel_number } => {
-                            play_channel::play_channel(
+                            if play_channel::play_channel(
                                 channel_number,
                                 &mut status_of_rradio,
                                 &config,
                                 &mut playbin,
                                 &mut lcd,
                                 &web_data_changed_tx,
-                            );
+                            )
+                            .is_err()
+                            {
+                                let _ = playbin.set_state(gstreamer::State::Null);
+                                // even if it does not stop is does matter much & we do not want to hide the error message
+                            }
                         }
                         keyboard::Event::OutputStatusDebug => {
                             println!("\r");
@@ -996,17 +1005,20 @@ async fn main() -> Result<(), String> {
                                     }
                                 };
                             } else if let Ok(channel_number) = new_text_from_user.parse::<usize>()
-                                && new_text_from_user.len() == 2
+                                && new_text_from_user.len() == 2 &&
                             // it is numeric & 2 digits long (channels are two digits)
-                            {
-                                play_channel::play_channel(
+                            play_channel::play_channel(
                                     channel_number,
                                     &mut status_of_rradio,
                                     &config,
                                     &mut playbin,
                                     &mut lcd,
                                     &web_data_changed_tx,
-                                );
+                                )
+                                .is_err()
+                            {
+                                let _ = playbin.set_state(gstreamer::State::Null);
+                                // even if it does not stop is does matter much & we do not want to hide the error message
                             }
                         } // else do nothing as either the user is in the process of entering a valid channel or the input is obviously wrong
                     },

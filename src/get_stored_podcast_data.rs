@@ -1,5 +1,5 @@
 use super::PodcastDataAllStations;
-use crate::player_status::PlayerStatus;
+use crate::{get_channel_details, player_status::PlayerStatus};
 
 /// Given the name of the file that stores the list of podcasts that are wanted, returns the list of podcasts
 pub fn get_stored_podcast_data(
@@ -16,8 +16,9 @@ pub fn get_stored_podcast_data(
         }
 
         Err(error) => {
-            const OS_ERROR_NO_SUCH_FILE_OR_DIRECTORY: i32 = 2;
-            if let Some(OS_ERROR_NO_SUCH_FILE_OR_DIRECTORY) = error.raw_os_error() {
+            if let Some(get_channel_details::OS_ERROR_NO_SUCH_FILE_OR_DIRECTORY) =
+                error.raw_os_error()
+            {
                 return Err(Ok(())); // file not found is a valid state; all it means is that the user has not yet stored any podcasts
             }
 

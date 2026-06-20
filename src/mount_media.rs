@@ -1,4 +1,4 @@
-use crate::get_channel_details::{ChannelErrorEvents, ChannelFileDataDecoded};
+use crate::get_channel_details::{self, ChannelErrorEvents, ChannelFileDataDecoded};
 use crate::read_config::MediaDetails;
 use std::fs;
 
@@ -18,7 +18,7 @@ pub fn mount_media_for_current_channel(
 /// & returns the mount folder if the mount is successful.
 pub fn mount_media(media_details: &mut MediaDetails) -> Result<String, ChannelErrorEvents> {
     if media_details.is_mounted {
-        println!("Device is already mounted {:?}\r", media_details.device);
+        println!("Device is already mounted {:?}\r", &media_details.device);
         return Ok(media_details.mount_folder.clone()); // it is already mounted
     }
 
@@ -66,13 +66,14 @@ pub fn mount_media(media_details: &mut MediaDetails) -> Result<String, ChannelEr
             eprintln!("Samba mount error is {:?}\r", mount_error);
 
             // the value returned by the operating system if there is no device
-            const OS_ERROR_NO_SUCH_FILE_OR_DIRECTORY: i32 = 2;
             const OS_ERROR_NO_SUCH_DEVICE_OR_ADDRESS: i32 = 6;
             const OS_RESOURCE_BUSY: i32 = 16;
             let mount_error_as_option = mount_error.raw_os_error();
             media_details.is_mounted = false; // whatever the previous status was, now we have failed
             match mount_error_as_option {
-                Some(OS_ERROR_NO_SUCH_FILE_OR_DIRECTORY) => Err(ChannelErrorEvents::NoUSBDevice),
+                Some(get_channel_details::OS_ERROR_NO_SUCH_FILE_OR_DIRECTORY) => {
+                    Err(ChannelErrorEvents::NoUSBDevice)
+                }
                 Some(OS_ERROR_NO_SUCH_DEVICE_OR_ADDRESS) => Err(
                     ChannelErrorEvents::NoSuchDeviceOrDirectory(media_details.device.clone()),
                 ),
