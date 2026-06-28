@@ -14,7 +14,7 @@ use crate::{
     get_channel_details::{self, SourceType}, ping::PingTimeAndDestination, player_status
 };
 use anyhow::Context;
-use substring::Substring;
+use itertools::Itertools;
 
 mod character_pattern;
 pub mod get_mute_state;
@@ -338,7 +338,7 @@ impl Lc {
     }
 
     /// returns a handle to the LCD screen or panics & explains why.
-    /// if it fail, that will typically either be because the caller is not running with enough priviledge
+    /// if it fails, that will typically either be because the caller is not running with enough priviledge
     /// or the program has already been started. In the latter case, the program tries to kill the other program
     /// & tries once more to get the screen.
     pub fn new() -> anyhow::Result<Self> {
@@ -357,35 +357,29 @@ impl Lc {
                     //& then two lines, one is our PID & the other is the PID of the program we are trying to kill
                 {
                     Ok(output) => {
-                        let output_as_a_string =
-                            unsafe { String::from_utf8_unchecked(output.stdout) }; // convert the output from UTF8 to a string 
+                        let output_as_a_vec_of_lines : Vec<&str>= std::str::from_utf8(&output.stdout).unwrap_or_default().lines().collect();
+                        let my_pid_as_string= std::process::id().to_string();
+                        let my_pid_as_str = my_pid_as_string.as_str() ;
 
-                        let output_as_a_vec_of_lines: Vec<&str> =
-                            output_as_a_string.lines().collect(); // convert the output, which is a series of bytes, to a string
-
-                        let my_pid = std::process::id();
-                        for line in output_as_a_vec_of_lines.iter(){
-                            let trimmed_line = line.trim_start();
-                            if let Some(postion ) =  trimmed_line.find(" "){  // find the space after the PID
-                            // use substring.to remove the space & all after it, leaving just the PID as characters  
-                                if let Ok (pid) = line.trim_start().substring(0, postion).parse::<u32>() && pid != my_pid {
-                                    // we have found the PID to kill
-                                    match std::process::Command::new("/bin/kill").arg(format!("{pid}")).output()   {
-                                    Ok(_success_message)=> {std::thread::sleep(Duration::from_millis(50) ); //wait for the other program to be killed
-                                        let lcd_file = std::fs::File::options().write(true).open("/dev/lcd").
-                                        context("Failed to open LCD file after succesfully stopping a previous version of rradio.\r")?;
-                                        Self::clear_screen(&lcd_file);
-                                        return Ok(Lc {lcd_file})}
-                                    Err(failure_message)=> {
-                                        anyhow::bail!(format!(
-                                            "Probably failed to kill the previous process of this program that was using the screen{:?}. Got message\r", failure_message))}
-                                    }                                  
-                                }
+                        for line in output_as_a_vec_of_lines.iter().dropping(1){ // drop the title line
+                            let (pid, _) = line.trim_start().split_once(" ").unwrap_or_default();
+                            if  pid != my_pid_as_str {
+                                // we have found the PID to kill
+                                match std::process::Command::new("/bin/kill").arg(pid).output()   {
+                                Ok(_success_message)=> {std::thread::sleep(Duration::from_millis(500) ); //wait for the other program to be killed
+                                    let lcd_file = std::fs::File::options().write(true).open("/dev/lcd").
+                                    context("Failed to open LCD file after succesfully stopping a previous version of rradio.")?;
+                                    Self::clear_screen(&lcd_file);
+                                    return Ok(Lc {lcd_file})}
+                                Err(failure_message)=> {
+                                    anyhow::bail!(format!(
+                                        "Probably failed to kill the previous process that was using the screen{:?}.\r", failure_message))}
+                                }                                  
                             }
                         }
                     }
                     Err(error) => {
-                        anyhow::bail!("When trying to get the PIDs in order to stop the previous version of the program got error {:?}",error)
+                        anyhow::bail!("When trying to get the PIDs in order to stop the previous version of the program got {:?}",error)
                     }
                 };
             } else {

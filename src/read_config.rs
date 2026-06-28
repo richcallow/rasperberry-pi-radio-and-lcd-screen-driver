@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 #[derive(PartialEq, Debug, Serialize, Deserialize)]
 pub struct StartTime {
     pub time: String,
-    pub channel: String,
+    pub channel: usize,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -243,9 +243,7 @@ impl Config {
                     ));
                 }
 
-                if let Ok(channel_number) = start_time.channel.parse::<usize>()
-                    && channel_number < NUMBER_OF_POSSIBLE_CHANNELS
-                {
+                if start_time.channel < NUMBER_OF_POSSIBLE_CHANNELS {
                 } else {
                     return Err(format!("Start channel {} is invalid", start_time.channel));
                 }

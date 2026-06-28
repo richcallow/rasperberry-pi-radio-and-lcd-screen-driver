@@ -1,7 +1,6 @@
 // sends & receives pings & gets the ping time
 use std::process::{Command, Stdio};
 //use pnet_packet::ip;
-use substring::Substring;
 
 use crate::{
     get_channel_details,
@@ -81,20 +80,16 @@ pub fn send_ping(
     let address = if (number_of_remote_pings_to_this_channel & 1 != 0)
         || (number_of_remote_pings_to_this_channel > config.max_number_of_remote_pings)
     {
-        status_of_rradio.network_data.gateway_ip_address.clone()
+        &status_of_rradio.network_data.gateway_ip_address
     } else {
-        status_of_rradio.position_and_duration[status_of_rradio.channel_number]
-            .address_to_ping
-            .clone()
-    };
+        &status_of_rradio.position_and_duration[status_of_rradio.channel_number].address_to_ping
+    }
+    .as_str();
 
     let return_value = Command::new("/bin/ping")
         .args([
-            address,
-            "-c".to_string(),
-            "1".to_string(), // send one ping and then stop
-            "-W".to_string(),
-            "3".to_string(), // wait that number of seconds before timing out
+            address, "-c", "1", // send one ping and then stop
+            "-W", "3", // wait that number of seconds before timing out
         ])
         //.stdin(Stdio::piped())    // not needed as we do not send anything after the initial command
         .stdout(Stdio::piped()) // needed as we need to capture what is sent back
@@ -107,11 +102,9 @@ pub fn send_ping(
     return_value
 }
 
-/// Updates status_of_rradio.ping_data giving either PingResponseReceived or TimedOut if a response is received,
-/// but not too recently so we do not ping too often
+/// status_of_rradio.ping_data.can_send_ping = true if a response is received, but not too recently so we do not ping too often
 /// Otherwise does nothing
 pub fn see_if_there_is_a_ping_response(status_of_rradio: &mut player_status::PlayerStatus) {
-    // must not ping too frequently; so return without doing anything if the previous ping is recent or we should not be sending pings
     if ((chrono::Utc::now() - status_of_rradio.ping_data.last_ping_time_of_day).num_milliseconds()
         > 3000)
         && (status_of_rradio.channel_number <= NUMBER_OF_POSSIBLE_CHANNELS)// only ping valid channels
@@ -136,77 +129,30 @@ pub fn get_ping_time(
     }
     match ping_output {
         Ok(output) => {
-            let mut ip_address = unsafe { String::from_utf8_unchecked(output.stdout) }; // convert the output, which is a series of bytes, to a string
-
-            ip_address = ip_address.substring(5, ip_address.len()).to_string(); // remove the leading characters which are "PING"
-            if let Some(position_of_end_of_ip_address) = ip_address.find(" ") {
-                // find the space after the IP address
-                let mut rest_of_string = ip_address.split_off(position_of_end_of_ip_address);
-                // at this point ip_address is the IP address of the address the ping was sent to.
-
-                let split_text = "mdev = "; // the text just before the ping time
-                if let Some(position_mdev) = rest_of_string.find(split_text) {
-                    let mut ping_time_as_string =
-                        rest_of_string.split_off(position_mdev + split_text.len()); // at this point, the string contains too much trailing text.
-                    if let Some(position_slash) = ping_time_as_string.find('/') {
-                        let _ = ping_time_as_string.split_off(position_slash);
-                        match ping_time_as_string.parse::<f32>() {
-                            Ok(time) => {
-                                let destination = if ip_address
-                                    == status_of_rradio.network_data.gateway_ip_address
-                                {
-                                    PingWhere::Local
-                                } else {
-                                    PingWhere::Remote
-                                };
-                                status_of_rradio.ping_data.ping_time_and_destination =
-                                    PingTimeAndDestination {
-                                        time_in_ms: Some(time),
-                                        destination,
-                                    };
-                                Ok(())
-                            }
-                            Err(error_message) => {
-                                status_of_rradio.ping_data.ping_time_and_destination =
-                                    PingTimeAndDestination {
-                                        time_in_ms: None,
-                                        destination: PingWhere::Nothing,
-                                    };
-                                Err(format!(
-                                    "Could not convert the ping time \" {} to a float; got {}\r",
-                                    ping_time_as_string, error_message
-                                ))
-                            }
-                        }
-                    } else {
-                        Err(
-                            "Could not find the terminating slash when looking for a ping"
-                                .to_string(),
-                        )
-                    }
-                } else {
-                    let ping_destinaton =
-                        if ip_address == status_of_rradio.network_data.gateway_ip_address {
-                            PingWhere::Local
-                        } else {
-                            PingWhere::Remote
-                        };
-
-                    status_of_rradio.ping_data.ping_time_and_destination = PingTimeAndDestination {
-                        time_in_ms: None,
-                        destination: ping_destinaton,
-                    };
-                    if rest_of_string.contains("0 received, 100% packet loss, time 0ms") {
-                        return Ok(()); // we timed out but it is OK as at least we got a response
-                    }
-                    Err(format!(
-                        "Could not parse the time returned from ping. The address pinged is {ip_address}  The string was {}",
-                        rest_of_string
-                    ))
-                }
+            // convert the bytes to a str
+            let (ip_address_only, time_data) = std::str::from_utf8(&output.stdout)
+                .unwrap_or_default()
+                .strip_prefix("PING ")
+                .unwrap_or("Error could not find prefix")
+                .split_once(" ")
+                .unwrap_or_default();
+            let destination = if ip_address_only == status_of_rradio.network_data.gateway_ip_address
+            {
+                PingWhere::Local
             } else {
-                Err("In ping, failed to find address".to_string())
-            }
+                PingWhere::Remote
+            };
+
+            let (_, time_data2) = time_data.split_once("mdev = ").unwrap_or_default();
+            // the time is between the str "mdev = " & the next /
+            let (time_as_str, _) = time_data2.split_once("/").unwrap_or_default();
+            let time = time_as_str.parse::<f32>().unwrap_or_default();
+
+            status_of_rradio.ping_data.ping_time_and_destination = PingTimeAndDestination {
+                time_in_ms: Some(time),
+                destination,
+            };
+            Ok(())
         }
         Err(error) => Err(error.to_string()),
     }

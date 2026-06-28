@@ -1,5 +1,5 @@
+use crate::get_channel_details::ChannelFileDataDecoded;
 use crate::lcd::{LineNum, TextBuffer};
-use crate::player_status::RealTimeDataOnOneChannel;
 use crate::unmount::unmount_if_needed;
 use crate::{PlayerStatus, mount_media};
 use crate::{
@@ -138,9 +138,10 @@ impl PlaybinElement {
         seek_wanted_if_possible: bool,
     ) -> Result<(), String> {
         if status_of_rradio.running_status != RunningStatus::Startingup
-            && let Err(error) = mount_media::mount_media_for_current_channel(
+            && let Err(error) = mount_media::mount_memory_stick_option(
                 &mut status_of_rradio.position_and_duration[status_of_rradio.channel_number]
-                    .channel_data,
+                    .channel_data
+                    .media_details,
             )
         {
             return Err(error.to_lcd_screen());
@@ -306,8 +307,11 @@ impl PlaybinElement {
         }
     }
 }
-pub fn unmount_usb(channel_file_data_decoded: &mut RealTimeDataOnOneChannel) -> Result<(), String> {
-    if channel_file_data_decoded.channel_data.source_type == SourceType::Usb {
+
+pub fn unmount_if_usb(
+    channel_file_data_decoded: &mut ChannelFileDataDecoded,
+) -> Result<(), String> {
+    if channel_file_data_decoded.source_type == SourceType::Usb {
         return unmount_if_needed(channel_file_data_decoded);
     }
     Ok(())

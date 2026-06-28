@@ -1,7 +1,7 @@
 //! This file get the details of the channel we are about to play as ChannelFileData
 //! It normally picks a random album & then plays all of that; however if a playlist is specified, it selects a random album and then plays it.
 
-use crate::gstreamer_interfaces::unmount_usb;
+use crate::gstreamer_interfaces::unmount_if_usb;
 use crate::read_config::AuralNotifications;
 use crate::read_config::{self, MediaDetails};
 use crate::{
@@ -288,7 +288,8 @@ pub fn get_channel_details_from_mountable_media(
     aural_notifications: &AuralNotifications, // taken from config.toml
     channel_file_data_decoded: &mut ChannelFileDataDecoded,
 ) -> Result<ChannelFileDataDecoded, ChannelErrorEvents> {
-    let mount_folder = mount_media::mount_media_for_current_channel(channel_file_data_decoded)?;
+    let mount_folder =
+        mount_media::mount_memory_stick_option(&mut channel_file_data_decoded.media_details)?;
     if channel_file_data_decoded.random_tracks_wanted {
         return set_up_playlist_random_albums(
             mount_folder,
@@ -470,6 +471,23 @@ pub fn play_cd(
     media_details: &MediaDetails, // eg /dev/sr0 or /dev/cdrom
     filename_sound_at_end_of_playlist: &Option<String>,
 ) -> Result<ChannelFileDataDecoded, ChannelErrorEvents> {
+    if media_details.device == "/dev/sr" {
+        let mut new_details = media_details.clone();
+
+        for cdcounter in 0..9 {
+            new_details.device = format!("/dev/sr{}", cdcounter);
+
+            match play_cd(&new_details, filename_sound_at_end_of_playlist) {
+                Ok(good_result) => return Ok(good_result),
+                Err(error_result) => {
+                    if cdcounter >= 9 {
+                        return Err(error_result);
+                    }
+                }
+            }
+        }
+    }
+
     let device = std::fs::File::open(media_details.device.clone())
         .map_err(|err| ChannelErrorEvents::FailedToOpenCdDrive(err.raw_os_error()))?;
 
@@ -585,9 +603,9 @@ pub fn store_channel_details_and_implement_them(
     status_of_rradio.position_and_duration[status_of_rradio.channel_number].position =
         ClockTime::ZERO;
 
-    if let Err(error) =
-        unmount_usb(&mut status_of_rradio.position_and_duration[previous_channel_number])
-    {
+    if let Err(error) = unmount_if_usb(
+        &mut status_of_rradio.position_and_duration[previous_channel_number].channel_data,
+    ) {
         status_of_rradio
             .all_4lines
             .update_if_changed(error.as_str());
@@ -700,10 +718,10 @@ fn get_channel_details(
                             // next work out the type of media
                             match toml_result.clone() {
                                 Ok(mut channel_file_data_decoded) => {
-                                    if let Some(media_details) =
-                                        channel_file_data_decoded.media_details.clone()
+                                    if let Some(ref media_details) =
+                                        channel_file_data_decoded.media_details
                                     {
-                                        if media_details.device.starts_with("/dev/sd")
+                                        if media_details.device.starts_with("/dev/sd") // memory stick
                                             || media_details.device.starts_with("//")
                                             || media_details.disk_identifier.is_some()
                                         {
@@ -713,7 +731,7 @@ fn get_channel_details(
                                         {
                                             channel_file_data_decoded.source_type = SourceType::Cd;
                                             return play_cd(
-                                                &media_details,
+                                                media_details,
                                                 &config
                                                     .aural_notifications
                                                     .filename_sound_at_end_of_playlist,

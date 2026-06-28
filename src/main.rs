@@ -33,16 +33,16 @@ mod read_config;
 mod unmount;
 mod web;
 
-use crate::get_channel_details::{ChannelFileDataDecoded, get_ip_address};
 use crate::{extract_html::extract, lcd::TextBuffer};
+use get_channel_details::{
+    ChannelFileDataDecoded, get_ip_address, store_channel_details_and_implement_them,
+};
 
 use crate::html_helpers::write_status_to_web_page;
-use crate::lcd::get_mute_state::set_mute_state;
 use crate::player_status::{PODCAST_CHANNEL_NUMBER, RealTimeDataOnOneChannel};
 use crate::unmount::unmount_all;
 use crate::web::{DataChanged, SeekTimes};
-use get_channel_details::store_channel_details_and_implement_them;
-use lcd::{RunningStatus, ScrollData};
+use lcd::{RunningStatus, ScrollData, get_mute_state::set_mute_state};
 use ping::{get_ping_time, see_if_there_is_a_ping_response};
 use player_status::NUMBER_OF_POSSIBLE_CHANNELS;
 use player_status::PlayerStatus;
@@ -118,10 +118,7 @@ async fn main() -> Result<(), String> {
     match lcd::Lc::new() {
         Ok(success) => lcd = success,
         Err(lcd_error) => {
-            return Err(format!(
-                "Could not open the LCD driver. Got error {}",
-                lcd_error
-            ));
+            return Err(lcd_error.to_string());
         }
     }
 
@@ -256,6 +253,8 @@ async fn main() -> Result<(), String> {
 
             let mut some_timer = tokio_stream::wrappers::IntervalStream::new(
                 tokio::time::interval(std::time::Duration::from_millis(300)),
+                // If this time is not significantly shorter than 1 second, the auto start at the requested time might not work.
+                // also wants to be short so that the program appears to respond instantly to commands
             )
             .map(Event::Ticker);
 
@@ -1023,6 +1022,36 @@ async fn main() -> Result<(), String> {
                         } // else do nothing as either the user is in the process of entering a valid channel or the input is obviously wrong
                     },
                     Some(Event::Ticker(_now)) => {
+                        let now = chrono::Local::now().format("%H:%M:%S").to_string();
+                        // this for loop migh tfail to spot a wanted time match if some_timer has an interval that is not significantly shorter than 1 second
+                        for one_start_time in config.start_times.iter() {
+                            if one_start_time.time == now {
+                                if one_start_time.channel == status_of_rradio.channel_number {
+                                    if status_of_rradio.gstreamer_state == gstreamer::State::Paused
+                                    {
+                                        if let Err(_error_message) =
+                                            playbin.set_state(gstreamer::State::Playing)
+                                        {
+                                            eprintln!(
+                                                "Could not set the gstreamer state when user hit play//pause\r"
+                                            )
+                                        }
+                                        set_mute_state(gstreamer::State::Playing);
+                                    }
+                                } else if play_channel::play_channel(
+                                    one_start_time.channel,
+                                    &mut status_of_rradio,
+                                    &config,
+                                    &mut playbin,
+                                    &mut lcd,
+                                    &web_data_changed_tx,
+                                )
+                                .is_err()
+                                {
+                                    eprintln!("Failed to start channel when requested");
+                                };
+                            }
+                        }
                         if status_of_rradio.channel_number
                             <= player_status::NUMBER_OF_POSSIBLE_CHANNELS
                             && let Some(position) = playbin

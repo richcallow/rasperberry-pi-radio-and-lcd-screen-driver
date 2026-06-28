@@ -162,7 +162,10 @@ impl PlayerStatus {
         writeln!(report, "Example file format for a CD drive")?;
 
         writeln!(report, "[media_details]")?;
-        writeln!(report, "device = \"/dev/sr0\"")?;
+        writeln!(
+            report,
+            "device = \"/dev/sr0\"\t\tthe digit and be ommitted. In that case the program tries sr0 to sr9"
+        )?;
 
         writeln!(report, "\nor")?;
 
@@ -229,7 +232,7 @@ impl PlayerStatus {
             report,
             "version = \"2.0\" #optional entry to specify the Samba version to use"
         )?;
-        writeln!(report, "mount_folder = \"/home/pi/remote_mount_folder\"")?;
+        writeln!(report, "mount_folder = \"/home/pi/remote_mount_folder/\"")?;
         writeln!(
             report,
             "[media_details.authetication_data]     #omit this entry if there is no authentication data"
@@ -254,8 +257,11 @@ impl PlayerStatus {
 
         writeln!(report, "[media_details]")?;
         writeln!(report, "channel_number = 90")?;
-        writeln!(report, "device = \"/dev/sda1\"")?;
-        writeln!(report, "mount_folder = \"/home/pi/local_mount_folder\"")?; // name of the folder must be the same as used elsewhere 
+        writeln!(
+            report,
+            "device = \"/dev/sda1\"\t\tthe digit and be ommitted. In that case the program tries sda1 to sda9"
+        )?;
+        writeln!(report, "mount_folder = \"/home/pi/local_mount_folder/\"")?; // name of the folder must be the same as used elsewhere 
 
         Ok(report)
     }

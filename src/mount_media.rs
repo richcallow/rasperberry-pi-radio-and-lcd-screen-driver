@@ -1,25 +1,45 @@
-use crate::get_channel_details::{self, ChannelErrorEvents, ChannelFileDataDecoded};
+use crate::get_channel_details::{self, ChannelErrorEvents};
 use crate::read_config::MediaDetails;
 use std::fs;
 
-/// Mounts media if the media is a type that is mountable.
+/// Mounts Samba share or local memory stick.
 /// Returns the mount folder if the mount is successful.
-pub fn mount_media_for_current_channel(
-    channel_file_data_decoded: &mut ChannelFileDataDecoded,
+pub fn mount_memory_stick_option(
+    media_details_as_option: &mut Option<MediaDetails>,
 ) -> Result<String, ChannelErrorEvents> {
-    if let Some(media_details) = &mut channel_file_data_decoded.media_details {
-        mount_media(media_details)
+    if let Some(media_details) = media_details_as_option {
+        mount_memory_stick(media_details)
     } else {
         Ok(String::new())
     }
 }
 
-/// Mounts a remote memory stick using Samba or CIFS; sets is_mounted = true if successful
+/// Mounts a memory stick using Samba or CIFS; sets is_mounted = true if successful
 /// & returns the mount folder if the mount is successful.
-pub fn mount_media(media_details: &mut MediaDetails) -> Result<String, ChannelErrorEvents> {
+pub fn mount_memory_stick(media_details: &mut MediaDetails) -> Result<String, ChannelErrorEvents> {
     if media_details.is_mounted {
         println!("Device is already mounted {:?}\r", &media_details.device);
         return Ok(media_details.mount_folder.clone()); // it is already mounted
+    }
+
+    let mut new_details = media_details.clone();
+    if media_details.device == "/dev/sda" {
+        for usb_counter in 1..9 {
+            // 1 to 9 as memory sticks start at 1 unlike CDs
+            new_details.device = format!("/dev/sda{}", usb_counter);
+            match mount_memory_stick(&mut new_details) {
+                Ok(good_result) => {
+                    media_details.is_mounted = true;
+                    // as we handed over a clone, not the real thing, we have to manually set this true
+                    return Ok(good_result);
+                }
+                Err(error_result) => {
+                    if usb_counter >= 9 {
+                        return Err(error_result);
+                    }
+                }
+            }
+        }
     }
 
     let mut data_string;
@@ -63,7 +83,10 @@ pub fn mount_media(media_details: &mut MediaDetails) -> Result<String, ChannelEr
         }
 
         Err(mount_error) => {
-            eprintln!("Samba mount error is {:?}\r", mount_error);
+            eprintln!(
+                "when trying to mount {} got Samba mount error {:?}\r",
+                media_details.device, mount_error
+            );
 
             // the value returned by the operating system if there is no device
             const OS_ERROR_NO_SUCH_DEVICE_OR_ADDRESS: i32 = 6;
@@ -136,7 +159,7 @@ fn mount_exact_drive_unknown(
 
                         local_media_details.device = new_device;
                         local_media_details.disk_identifier = None; // set to None so we use the simpler mount function 
-                        match mount_media(&mut local_media_details) {
+                        match mount_memory_stick(&mut local_media_details) {
                             Ok(mount_folder) => match fs::read_dir(&mount_folder) {
                                 Ok(read_dir) => {
                                     if let Some(disk_identifier) = &media_details.disk_identifier {
